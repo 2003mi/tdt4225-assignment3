@@ -1,5 +1,7 @@
-from pprint import pprint 
-from DbConnector import DbConnector
+"""Run from the project root with:  python -m src.example"""
+from pprint import pprint
+
+from src.DbConnector import DbConnector
 
 
 class ExampleProgram:
@@ -10,7 +12,7 @@ class ExampleProgram:
         self.db = self.connection.db
 
     def create_coll(self, collection_name):
-        collection = self.db.create_collection(collection_name)    
+        collection = self.db.create_collection(collection_name)
         print('Created collection: ', collection)
 
     def insert_documents(self, collection_name):
@@ -18,44 +20,41 @@ class ExampleProgram:
             {
                 "_id": 1,
                 "name": "Bobby",
-                "courses": 
+                "courses":
                     [
-                    {'code':'TDT4225', 'name': ' Very Large, Distributed Data Volumes'},
-                    {'code':'BOI1001', 'name': ' How to become a boi or boierinnaa'}
-                    ] 
+                    {'code': 'TDT4225', 'name': ' Very Large, Distributed Data Volumes'},
+                    {'code': 'BOI1001', 'name': ' How to become a boi or boierinnaa'}
+                    ]
             },
             {
                 "_id": 2,
                 "name": "Bobby",
-                "courses": 
+                "courses":
                     [
-                    {'code':'TDT02', 'name': ' Advanced, Distributed Systems'},
-                    ] 
+                    {'code': 'TDT02', 'name': ' Advanced, Distributed Systems'},
+                    ]
             },
             {
                 "_id": 3,
                 "name": "Bobby",
             }
-        ]  
+        ]
         collection = self.db[collection_name]
         collection.insert_many(docs)
-        
+
     def fetch_documents(self, collection_name):
         collection = self.db[collection_name]
         documents = collection.find({})
-        for doc in documents: 
+        for doc in documents:
             pprint(doc)
-        
 
     def drop_coll(self, collection_name):
         collection = self.db[collection_name]
         collection.drop()
 
-        
     def show_coll(self):
-        collections = self.client['test'].list_collection_names()
+        collections = self.db.list_collection_names()
         print(collections)
-         
 
 
 def main():
@@ -67,9 +66,7 @@ def main():
         program.insert_documents(collection_name="Person")
         program.fetch_documents(collection_name="Person")
         program.drop_coll(collection_name="Person")
-        # program.drop_coll(collection_name='person')
-        # program.drop_coll(collection_name='users')
-        # Check that the table is dropped
+        # Check that the collection is dropped
         program.show_coll()
     except Exception as e:
         print("ERROR: Failed to use database:", e)

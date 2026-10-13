@@ -5,3 +5,4 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 SRC_DIR = PROJECT_ROOT / "src"
 DATA_DIR = PROJECT_ROOT / "data"  # put the dataset CSVs here
 ENV_FILE = PROJECT_ROOT / ".env"
+OUTPUT_DIR = PROJECT_ROOT / "output"  # plots and other generated files
