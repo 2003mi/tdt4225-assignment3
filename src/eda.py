@@ -42,9 +42,17 @@ def subsection(title):
 
 
 def show(data, headers="keys", **kwargs):
-    kwargs.setdefault("showindex", False)
-    print(tabulate(data, headers=headers, tablefmt="simple",
-                   floatfmt=",.2f", intfmt=",", **kwargs))
+    if isinstance(data, pd.DataFrame):
+        if headers == "keys":
+            headers = list(data.columns)
+        data = data.astype(object).values.tolist()
+    rows = [list(r) for r in data]
+    # Columns holding text are printed as-is. Without this, tabulate 0.9 tries to
+    # apply the "," number format to strings like "1" and crashes.
+    n_cols = max((len(r) for r in rows), default=0)
+    text_cols = [i for i in range(n_cols) if any(isinstance(r[i], str) for r in rows if i < len(r))]
+    print(tabulate(rows, headers=headers, tablefmt="simple", floatfmt=",.2f",
+                   intfmt=",", disable_numparse=text_cols, **kwargs))
 
 
 def pct(n, total):
@@ -466,7 +474,7 @@ def eda_ratings(data_dir, small, link_map):
     subsection("Activity")
     rows = []
     for label, s in (("ratings per user", user_counts), ("ratings per movie", movie_counts)):
-        rows.append([label, s.min(), s.median(), s.mean(), s.max()])
+        rows.append([label, int(s.min()), float(s.median()), float(s.mean()), int(s.max())])
     show(rows, headers=["", "min", "median", "mean", "max"])
     print(f"Users with >= 20 ratings: {int((user_counts >= 20).sum()):,} "
           f"({pct((user_counts >= 20).sum(), user_counts.size)})")
