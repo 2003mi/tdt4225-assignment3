@@ -1,0 +1,28 @@
+services:
+  mongo:
+    image: mongo:7.0.1
+    container_name: tdt4225-mongo
+    restart: unless-stopped
+    environment:
+      # Admin (root) user, created on first start only
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USER:-admin}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:-adminpw}
+      # Database the init script runs against
+      MONGO_INITDB_DATABASE: ${DB_NAME}
+      # App user (readWrite on DB_NAME), read by docker/mongo-init.js
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+    ports:
+      # Only reachable from your own machine
+      - "127.0.0.1:${DB_PORT:-27017}:27017"
+    volumes:
+      - mongo-data:/data/db
+      - ./docker/mongo-init.js:/docker-entrypoint-initdb.d/mongo-init.js:ro
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  mongo-data:
