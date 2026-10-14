@@ -2,6 +2,25 @@
 
 Prints tables to the terminal (screenshot these for the report) and saves
 plots to output/eda/.
+
+Approach
+--------
+Every CSV is first read with all columns as text (see src/load.py). That way
+nothing is silently converted, and we can count exactly which values fail to
+become numbers, dates or lists. For each file we look at four things:
+
+1. Structure   - row/column counts, whether the id column is valid, duplicates.
+2. Missing     - empty fields (NaN), but also values that *look* filled in and
+                 really mean "unknown": 0 for budget/revenue/runtime/votes,
+                 [] for list columns, gender 0 for cast.
+3. Content     - distributions of the important columns, and the nested
+                 objects inside the Python-literal columns (what keys they
+                 have, how many items per movie).
+4. Joins       - whether ids in one file actually exist in the others, since
+                 the Part 2 queries combine metadata, credits and ratings.
+
+Numbers that directly matter for a Part 2 query (e.g. how many directors have
+>= 5 movies for Q1) are printed so the query results can be sanity-checked.
 """
 from collections import Counter
 
@@ -111,7 +130,17 @@ def _hist(ax, values, bins, title, xlabel, log_x=False):
 
 
 def _check_ids(raw, name):
-    """Report non-numeric and duplicate ids. Returns (rows with valid id, numeric ids)."""
+    """Check the id column, which every join between the files depends on.
+
+    - Non-numeric ids: in movies_metadata.csv these are the rows where a
+      broken quote in the CSV shifted all columns one step, so a date ends
+      up in the id column.
+    - Duplicate ids: counted both as "same id" and "entire row identical".
+      Exact copies can simply be dropped; rows that share an id but differ
+      need a rule for which one to keep.
+
+    Returns (rows with a valid id, with id converted to int; mask of bad rows).
+    """
     ids = to_number(raw["id"])
     bad = ids.isna()
     print(f"Rows: {len(raw):,}   Columns: {raw.shape[1]}")
@@ -134,6 +163,53 @@ NUMERIC = ["budget", "revenue", "runtime", "vote_average", "vote_count", "popula
 
 
 def eda_metadata(data_dir):
+    """movies_metadata.csv - one row per movie, the main file.
+
+    Structure
+      - Malformed rows (id is a date) are printed so they can be inspected,
+        and duplicate ids are counted. For ids that occur more than once but
+        are not exact copies, we list which columns differ between the copies.
+
+    Missing values
+      - "missing" = empty field in the CSV.
+      - "0 or empty []" = a value is present but means unknown. TMDB stores an
+        unknown budget/revenue/runtime as 0, and no genres as "[]". These
+        have to become null before insert, otherwise medians/totals are wrong.
+
+    Numeric columns (budget, revenue, runtime, vote_average, vote_count, popularity)
+      - Stored as text in the CSV. We count values that fail to parse, zeros,
+        and min/median/mean/max of the values > 0.
+      - Extra checks: budget/revenue under 1000 USD (probably entered in
+        millions or placeholders), runtime over 300 min, how many movies
+        have both budget and revenue, and how many pass the vote_count
+        thresholds used in Q7 (>= 50) and Q8 (>= 100).
+
+    Release dates
+      - Missing/unparseable dates, the date range, and movies per decade.
+        Q5 and Q6 group by decade, so movies without a date drop out there.
+
+    Categorical columns
+      - status, adult, video and original_language value counts. Q9 filters
+        on original_language != "en".
+
+    Nested columns (genres, production_companies, production_countries,
+    spoken_languages, belongs_to_collection)
+      - Parsed with ast.literal_eval (single quotes, so not JSON). We count
+        parse failures and empty lists, and list which keys the objects
+        contain - e.g. production_companies has no country, which matters
+        for how Q9 is interpreted.
+      - Genres: count per genre, both in any position and as the primary
+        (first) genre used in Q5, plus genres per movie (Q3, Q10).
+      - Collections: movies per collection and how many have >= 3 (Q4).
+      - Movies with a US production country, and the non-English + US
+        subset that Q9 works on.
+
+    Text columns
+      - Missing overview/tagline, and how many mention "noir" (Q7).
+
+    Returns the metadata with numeric columns converted, dates parsed and
+    nested columns as Python lists/dicts.
+    """
     section("movies_metadata.csv")
     raw = load_metadata(data_dir)
     df, bad = _check_ids(raw, "metadata")
@@ -309,6 +385,32 @@ def eda_metadata(data_dir):
 # ----------------------------------------------------------------------------
 
 def eda_credits(data_dir, movie_ids):
+    """credits.csv - one row per movie with its full cast and crew lists.
+
+    Structure
+      - Valid and duplicate ids (same checks as metadata).
+      - cast and crew are Python-literal lists; we count parse failures,
+        empty lists, and the median/max list length.
+      - Join check: credit ids missing from metadata, and metadata movies
+        that have no credits row.
+
+    People (counted once per movie, after dropping duplicate movie ids)
+      - Distinct actors, and how many have >= 10 movies (Q3).
+      - Distinct directors (crew with job == "Director"), and how many have
+        >= 5 movies (Q1). People are counted by their TMDB person id, not by
+        name, since different people can share a name.
+      - Directors per movie (0, 1, 2+). Movies with several directors count
+        towards each of them in Q1/Q8; movies with none drop out.
+      - Cast entries without an "order" field, since Q6 uses order to pick
+        the top-5 billed actors.
+      - The 10 most common crew jobs.
+
+    Cast gender
+      - TMDB uses 0 = unknown, 1 = female, 2 = male. Shares are shown for
+        the full cast and for the top-5 billed per movie (the group Q6 is
+        about). A high unknown share means Q6 rests on fewer actors than
+        the cast size suggests.
+    """
     section("credits.csv")
     raw = load_credits(data_dir)
     df, _ = _check_ids(raw, "credits")
@@ -387,6 +489,16 @@ def eda_credits(data_dir, movie_ids):
 # ----------------------------------------------------------------------------
 
 def eda_keywords(data_dir, movie_ids):
+    """keywords.csv - one row per movie with a list of plot keywords.
+
+    - Valid and duplicate ids.
+    - Parse failures and movies with an empty keyword list (no keywords is
+      stored as "[]", not as an empty field, so it never shows as missing).
+    - Number of distinct keywords and the 10 most common ones.
+    - Join check: keyword ids that are not in metadata.
+    No Part 2 query uses keywords directly, but they are part of the dataset
+    and decide whether keywords are worth embedding in the movie documents.
+    """
     section("keywords.csv")
     raw = load_keywords(data_dir)
     df, _ = _check_ids(raw, "keywords")
@@ -405,6 +517,18 @@ def eda_keywords(data_dir, movie_ids):
 # ----------------------------------------------------------------------------
 
 def eda_links(data_dir, movie_ids, small):
+    """links.csv - maps MovieLens movieId (used in ratings) to tmdbId (the
+    id in metadata) and imdbId. It is the only bridge between the ratings
+    and the movies, so its quality decides how much of Q10 is usable.
+
+    - Missing tmdbId / imdbId: those MovieLens movies cannot be joined.
+    - Duplicate movieId or tmdbId: a duplicate would make one rating count
+      for two movies, or two MovieLens movies share one TMDB movie.
+    - How many tmdbIds actually exist in the metadata.
+
+    Returns a dict {movieId: tmdbId} for links that point at a known movie,
+    used to measure join coverage in eda_ratings.
+    """
     name = "links_small.csv" if small else "links.csv"
     section(name)
     raw = load_links(data_dir, small)
@@ -426,6 +550,26 @@ def eda_links(data_dir, movie_ids, small):
 # ----------------------------------------------------------------------------
 
 def eda_ratings(data_dir, small, link_map):
+    """ratings.csv - one row per (user, movie) rating from MovieLens.
+
+    The full file has ~26M rows, so it is read in chunks of 1M rows and only
+    running totals are kept (value counts per rating, per user and per movie).
+
+    - Totals: number of ratings, users and rated movies, and the timestamp
+      range (timestamps are Unix seconds).
+    - Duplicate (userId, movieId) pairs - a user should rate a movie once.
+      The file is sorted by userId, so a user's rows can only be split across
+      a chunk boundary; those rows are carried into the next chunk so the
+      check stays exact. If the file turns out not to be sorted, this is
+      reported and the duplicate count is only a lower bound.
+    - Rating values: MovieLens uses 0.5 to 5.0 in half-star steps (unlike
+      TMDB's 0-10 vote_average), so any other value would be an error.
+    - Activity: ratings per user and per movie (min/median/mean/max), and
+      how many users have >= 20 ratings (the Q10 threshold).
+    - Join coverage: how many rated movies, and how many ratings, can be
+      followed through links to a movie in metadata. Ratings that cannot
+      be joined have no genres and are lost for Q10.
+    """
     name = "ratings_small.csv" if small else "ratings.csv"
     section(name)
     total = 0
