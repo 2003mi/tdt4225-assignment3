@@ -21,6 +21,7 @@ The functions take already-loaded DataFrames (see run.py); movies_metadata.csv
 is passed in after the broken rows have been repaired (broken_rows.py).
 """
 from collections import Counter
+from datetime import datetime, timezone
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -197,7 +198,7 @@ def eda_metadata(raw: pd.DataFrame) -> pd.DataFrame:
 
     per_year = dates.dt.year.dropna().astype(int).value_counts().sort_index()
     fig, ax = plt.subplots(figsize=(8, 3.2))
-    ax.plot(per_year.index, per_year.values, color=BAR, linewidth=2)
+    ax.plot(per_year.index.to_numpy(), per_year.to_numpy(), color=BAR, linewidth=2)
     ax.set_title("Movies released per year")
     ax.set_ylabel("Movies")
     ax.set_ylim(bottom=0)
@@ -238,13 +239,13 @@ def eda_metadata(raw: pd.DataFrame) -> pd.DataFrame:
         for obj in parsed.dropna():
             for item in (obj if isinstance(obj, list) else [obj]):
                 keys.update(item.keys())
-        empty = int(parsed.map(lambda o: o is not None and len(o) == 0).sum())
+        empty = int(parsed.map(lambda o: isinstance(o, (list, dict)) and len(o) == 0).sum())
         rows.append([col, int(parsed.notna().sum()), empty, failed, ", ".join(sorted(keys))])
         df[col] = parsed
     show(rows, headers=["column", "parsed", "empty", "failed to parse", "keys in objects"])
 
     # Genres
-    names = df["genres"].map(lambda g: [x.get("name") for x in g] if g else [])
+    names = df["genres"].map(lambda g: [x.get("name") for x in g] if isinstance(g, list) else [])
     genre_counts = Counter(name for lst in names for name in lst)
     primary = names.map(lambda lst: lst[0] if lst else None).value_counts()
     print(f"\nGenres: {len(genre_counts)} distinct. Genres per movie: "
@@ -264,8 +265,8 @@ def eda_metadata(raw: pd.DataFrame) -> pd.DataFrame:
 
     # Countries / companies / languages
     countries = df["production_countries"].map(
-        lambda lst: {c.get("iso_3166_1") for c in lst} if lst else set())
-    has_us = countries.map(lambda s: "US" in s)
+        lambda lst: {c.get("iso_3166_1") for c in lst} if isinstance(lst, list) else set())
+    has_us = countries.map(lambda s: isinstance(s, set) and "US" in s)
     non_en = df["original_language"].notna() & (df["original_language"] != "en")
     companies = {c.get("name") for lst in df["production_companies"].dropna() for c in lst}
     print(f"\nProduction countries include US: {int(has_us.sum()):,} ({pct(has_us.sum(), n)})")
@@ -275,8 +276,8 @@ def eda_metadata(raw: pd.DataFrame) -> pd.DataFrame:
     # Text columns
     subsection("Text columns")
     for col in ("overview", "tagline"):
-        empty = df[col].isna() | (df[col].str.strip() == "")
-        print(f"{col}: {int(empty.sum()):,} missing/empty ({pct(empty.sum(), n)})")
+        blank = df[col].isna() | (df[col].str.strip() == "")
+        print(f"{col}: {int(blank.sum()):,} missing/empty ({pct(blank.sum(), n)})")
     text = (df["overview"].fillna("") + " " + df["tagline"].fillna("")).str.lower()
     print(f"overview/tagline containing 'noir': {int(text.str.contains('noir', regex=False).sum()):,}")
 
@@ -323,7 +324,7 @@ def eda_credits(raw: pd.DataFrame, movie_ids: set[int]) -> pd.DataFrame:
     df["crew"] = df["crew"].map(lambda v: parse_literal(v, list))
     for col in ("cast", "crew"):
         failed = int((raw.loc[df.index, col].notna() & df[col].isna()).sum())
-        sizes = df[col].map(lambda lst: len(lst) if lst else 0)
+        sizes = df[col].map(lambda lst: len(lst) if isinstance(lst, list) else 0)
         print(f"{col}: failed to parse {failed}, empty {int((sizes == 0).sum()):,}, "
               f"median size {sizes.median():.0f}, max {sizes.max():,}")
 
@@ -412,7 +413,7 @@ def eda_keywords(raw: pd.DataFrame, movie_ids: set[int]) -> None:
     df, _ = _check_ids(raw, "keywords")
     parsed = df["keywords"].map(lambda v: parse_literal(v, list))
     failed = int((df["keywords"].notna() & parsed.isna()).sum())
-    sizes = parsed.map(lambda lst: len(lst) if lst else 0)
+    sizes = parsed.map(lambda lst: len(lst) if isinstance(lst, list) else 0)
     counts = Counter(k.get("name") for lst in parsed.dropna() for k in lst)
     print(f"Failed to parse: {failed}   Empty keyword list: {int((sizes == 0).sum()):,} "
           f"({pct((sizes == 0).sum(), len(df))})   Distinct keywords: {len(counts):,}")
@@ -556,8 +557,10 @@ def eda_ratings(data_dir: Path, small: bool, link_map: dict[int, int]) -> pd.Ser
     user_counts = user_counts.astype(int)
     movie_counts = movie_counts.astype(int)
     print(f"Ratings: {total:,}   Users: {user_counts.size:,}   Movies rated: {movie_counts.size:,}")
-    print(f"Time range: {pd.to_datetime(ts_min, unit='s'):%Y-%m-%d} -> "
-          f"{pd.to_datetime(ts_max, unit='s'):%Y-%m-%d}")
+    if ts_min is not None and ts_max is not None:
+        first_day = datetime.fromtimestamp(int(ts_min), tz=timezone.utc)
+        last_day = datetime.fromtimestamp(int(ts_max), tz=timezone.utc)
+        print(f"Time range: {first_day:%Y-%m-%d} -> {last_day:%Y-%m-%d}")
     note = "" if sorted_by_user else " (file not sorted by userId — check is incomplete)"
     print(f"Duplicate (userId, movieId) pairs: {duplicates:,}{note}")
 
@@ -581,8 +584,8 @@ def eda_ratings(data_dir: Path, small: bool, link_map: dict[int, int]) -> pd.Ser
 
     fig, ax = plt.subplots(figsize=(7, 3))
     labels = [f"{r:g}" for r in rating_counts.index]
-    ax.bar(labels, rating_counts.values / 1e6 if total > 1e6 else rating_counts.values,
-           color=BAR, width=0.72)
+    heights = rating_counts.to_numpy(dtype=float)
+    ax.bar(labels, heights / 1e6 if total > 1e6 else heights, color=BAR, width=0.72)
     ax.set_title("Rating values")
     ax.set_xlabel("Rating")
     ax.set_ylabel("Ratings (millions)" if total > 1e6 else "Ratings")

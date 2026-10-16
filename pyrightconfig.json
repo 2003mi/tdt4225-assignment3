@@ -1,0 +1,6 @@
+{
+  "include": ["src", "task1.py"],
+  "venvPath": ".",
+  "venv": ".venv",
+  "typeCheckingMode": "standard"
+}

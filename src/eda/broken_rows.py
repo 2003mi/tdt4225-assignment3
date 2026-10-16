@@ -48,7 +48,9 @@ def sanity(stitched: dict[str, Any]) -> list[tuple[str, bool, Any]]:
         v = stitched.get(col)
         ok = v is None or pd.isna(v) or pd.notna(pd.to_numeric(v, errors="coerce"))
         checks.append((f"{col} is a number", ok, v))
-    date = pd.to_datetime(stitched.get("release_date"), errors="coerce", format="%Y-%m-%d")
+    release = stitched.get("release_date")
+    date = (pd.to_datetime(release, errors="coerce", format="%Y-%m-%d")
+            if isinstance(release, str) else pd.NaT)
     checks.append(("release_date is a date", pd.notna(date), stitched.get("release_date")))
     checks.append(("title present", pd.notna(stitched.get("title")), stitched.get("title")))
     status = stitched.get("status")
@@ -67,7 +69,7 @@ def run(raw: pd.DataFrame, data_dir: Path) -> pd.DataFrame:
 
     lines = (data_dir / FILENAME).read_bytes().split(b"\n") if pairs else []
     for i, j in pairs:
-        first = raw.loc[i]
+        first = raw.iloc[i]  # by position: always one row (a Series)
         print(f"\n--- id {first['id']}  {first['imdb_id']}  {first['original_title']} ---")
         print("Raw file around the record (>> = the two halves):")
         show_raw_lines(lines, str(first["imdb_id"]).encode())
@@ -75,9 +77,10 @@ def run(raw: pd.DataFrame, data_dir: Path) -> pd.DataFrame:
         if j is None:
             print(f"The row after it is not a second half - cannot stitch, will be dropped.")
             continue
-        stitched, split_col, leftover = stitch(first, raw.loc[j], columns)
+        second = raw.iloc[j]
+        stitched, split_col, leftover = stitch(first, second, columns)
         print(f"\nSplit inside '{split_col}'. Column by column:")
-        show([[c, short(first[c]), short(raw.loc[j, c]), short(stitched[c])] for c in columns],
+        show([[c, short(first[c]), short(second[c]), short(stitched[c])] for c in columns],
              headers=["column", "first half", "second half (as read)", "stitched"])
         if leftover:
             print("WARNING - second-half fields with nowhere to go:", ", ".join(leftover))

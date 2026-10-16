@@ -12,12 +12,20 @@ Finding: the values mix units. Some are in thousands (Little Witch Academia:
 so values under 1000 are set to null - each column on its own, since a movie
 can have a broken budget but a real revenue.
 """
+from datetime import datetime
+from typing import Any
+
 import pandas as pd
 
 from .common import section, short, show
 
 LIMIT = 1000
 ROWS = 20
+
+
+def fmt_date(value: Any) -> str:
+    """A date as YYYY-MM-DD; missing dates (NaT) become ''."""
+    return value.strftime("%Y-%m-%d") if isinstance(value, datetime) and pd.notna(value) else ""
 
 
 def run(meta: pd.DataFrame) -> None:
@@ -29,7 +37,7 @@ def run(meta: pd.DataFrame) -> None:
     def table(df: pd.DataFrame, sort_by: str) -> None:
         df = df.sort_values(sort_by, ascending=False, na_position="last").head(ROWS)
         show([[r.id, short(r.title, 40),
-               "" if r.release_date is None or str(r.release_date) == "NaT" else f"{r.release_date:%Y-%m-%d}",
+               fmt_date(r.release_date),
                r.budget, r.revenue] for r in df[cols].itertuples()],
              headers=cols)
 

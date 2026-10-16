@@ -66,7 +66,7 @@ def check_languages(meta: pd.DataFrame) -> None:
     lang = m["original_language"]
     print(f"Missing: {int(lang.isna().sum())}   'xx' (no language): {int((lang == 'xx').sum())}")
     has_us = m["production_countries"].map(
-        lambda lst: any(c.get("iso_3166_1") == "US" for c in lst) if lst else False)
+        lambda lst: isinstance(lst, list) and any(c.get("iso_3166_1") == "US" for c in lst))
     q9 = m[lang.notna() & (lang != "en") & has_us]
     print(f"Q9 candidates (original_language != 'en', US production country): {len(q9):,}, "
           f"of which 'xx': {int((q9['original_language'] == 'xx').sum())}")

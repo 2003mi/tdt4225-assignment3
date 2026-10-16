@@ -70,7 +70,8 @@ def repair_broken_rows(raw: pd.DataFrame) -> tuple[pd.DataFrame, int, int]:
     repaired, unrepaired = 0, []
     for i, j in pairs:
         if j is not None:
-            stitched, _, leftover = stitch(raw.loc[i], raw.loc[j], columns)
+            # .iloc = by position, always one row (a Series); raw has a 0..n-1 index
+            stitched, _, leftover = stitch(raw.iloc[i], raw.iloc[j], columns)
             if not leftover:
                 fixed.loc[i] = [stitched[c] for c in columns]
                 repaired += 1
