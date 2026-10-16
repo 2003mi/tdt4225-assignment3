@@ -26,12 +26,14 @@ Findings:
 """
 from collections import Counter
 
+import pandas as pd
+
 from .common import pct, section, short, show, subsection
 
 EXAMPLES = 10
 
 
-def check_same_film(meta):
+def check_same_film(meta: pd.DataFrame) -> None:
     subsection("Same imdb_id under different TMDB ids")
     m = meta.drop_duplicates("id")
     m = m[m["imdb_id"].notna()]
@@ -43,7 +45,7 @@ def check_same_film(meta):
              headers=["imdb_id", "id", "title", "vote_count"])
 
 
-def check_placeholders(meta):
+def check_placeholders(meta: pd.DataFrame) -> None:
     m = meta.drop_duplicates("id")
     for col in ("overview", "tagline"):
         text = m[col].dropna().str.strip()
@@ -58,7 +60,7 @@ def check_placeholders(meta):
           "real taglines can repeat too, so judge from the text.")
 
 
-def check_languages(meta):
+def check_languages(meta: pd.DataFrame) -> None:
     subsection("original_language")
     m = meta.drop_duplicates("id")
     lang = m["original_language"]
@@ -70,10 +72,10 @@ def check_languages(meta):
           f"of which 'xx': {int((q9['original_language'] == 'xx').sum())}")
 
 
-def check_people(credits, titles):
+def check_people(credits: pd.DataFrame, titles: pd.Series) -> None:
     """credits: one row per movie with cast/crew parsed (from core.eda_credits)."""
     n = len(credits)
-    stats = Counter()
+    stats: Counter[str] = Counter()
     repeated_actors, directors_acting = [], []
 
     for movie_id, cast, crew in zip(credits["id"], credits["cast"], credits["crew"]):
@@ -140,7 +142,7 @@ def check_people(credits, titles):
         show(directors_acting[:EXAMPLES], headers=["id", "title", "director"])
 
 
-def run(meta, credits, titles):
+def run(meta: pd.DataFrame, credits: pd.DataFrame, titles: pd.Series) -> None:
     """meta: from core.eda_metadata. credits: from core.eda_credits."""
     section("Extra: hidden quality problems")
     check_same_film(meta)

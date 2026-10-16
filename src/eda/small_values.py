@@ -12,19 +12,21 @@ Finding: the values mix units. Some are in thousands (Little Witch Academia:
 so values under 1000 are set to null - each column on its own, since a movie
 can have a broken budget but a real revenue.
 """
+import pandas as pd
+
 from .common import section, short, show
 
 LIMIT = 1000
 ROWS = 20
 
 
-def run(meta):
+def run(meta: pd.DataFrame) -> None:
     """meta: metadata from core.eda_metadata (numeric columns converted)."""
     section(f"Extra: budgets and revenues under ${LIMIT:,}")
     m = meta.drop_duplicates("id")
     cols = ["id", "title", "release_date", "budget", "revenue"]
 
-    def table(df, sort_by):
+    def table(df: pd.DataFrame, sort_by: str) -> None:
         df = df.sort_values(sort_by, ascending=False, na_position="last").head(ROWS)
         show([[r.id, short(r.title, 40),
                "" if r.release_date is None or str(r.release_date) == "NaT" else f"{r.release_date:%Y-%m-%d}",

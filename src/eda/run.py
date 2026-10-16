@@ -14,6 +14,8 @@
 
 Each CSV is loaded once here and passed to the steps that need it.
 """
+from pathlib import Path
+
 from ..load import load_credits, load_keywords, load_links, load_metadata
 from ..paths import DATA_DIR
 from . import (broken_rows, core, credits_dups, links_check, lost_ratings, quality,
@@ -21,7 +23,7 @@ from . import (broken_rows, core, credits_dups, links_check, lost_ratings, quali
 from .common import PLOT_DIR, banner, style
 
 
-def run_eda(data_dir=DATA_DIR, small=False, include_ratings=True):
+def run_eda(data_dir: Path = DATA_DIR, small: bool = False, include_ratings: bool = True) -> None:
     style()
 
     banner("STEP 0: REPAIR BROKEN ROWS")

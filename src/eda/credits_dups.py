@@ -10,23 +10,29 @@ different order".
 Finding: all 7 differing ids have an identical cast and only a differently
 ordered crew, so it does not matter which copy is kept.
 """
+from typing import Any, Literal
+
+import pandas as pd
+
 from ..load import parse_literal, to_number
 from .common import section, short, show
 
 MAX_LINES = 10  # entries printed per difference
 
+Kind = Literal["cast", "crew"]
 
-def entry_key(e, kind):
+
+def entry_key(e: dict[str, Any], kind: Kind) -> tuple[Any, Any]:
     return (e.get("id"), e.get("character") if kind == "cast" else e.get("job"))
 
 
-def describe(e, kind):
+def describe(e: dict[str, Any], kind: Kind) -> str:
     if kind == "cast":
         return f"{e.get('name')} as {e.get('character')!r} (order {e.get('order')})"
     return f"{e.get('name')} - {e.get('job')} ({e.get('department')})"
 
 
-def compare(copies, kind):
+def compare(copies: list[list[dict[str, Any]] | None], kind: Kind) -> str:
     """Print how the cast or crew lists differ between the copies of one movie."""
     lists = [c or [] for c in copies]
     keys = [[entry_key(e, kind) for e in lst] for lst in lists]
@@ -49,7 +55,7 @@ def compare(copies, kind):
     return "content"
 
 
-def run(raw_credits, titles):
+def run(raw_credits: pd.DataFrame, titles: pd.Series) -> None:
     """raw_credits: credits.csv as text. titles: Series id -> title."""
     section("Extra: credits rows that share an id but differ")
     credits = raw_credits[to_number(raw_credits["id"]).notna()].copy()

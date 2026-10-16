@@ -14,11 +14,13 @@ Finding: 29 / 29 / 29 - the metadata duplicates are exactly the shared
 tmdbIds. After dropping 219 links without tmdbId and 95 imdb mismatches,
 45,529 links remain with 0 shared tmdbIds.
 """
+import pandas as pd
+
 from ..load import to_number
 from .common import section
 
 
-def run(raw_links, meta):
+def run(raw_links: pd.DataFrame, meta: pd.DataFrame) -> None:
     """raw_links: links.csv as text. meta: metadata with integer ids (duplicates kept)."""
     section("Extra: duplicate ids vs. links, and cleaned links")
     links = raw_links.copy()

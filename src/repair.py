@@ -10,12 +10,14 @@ as two rows:
 stitch() puts the two halves back together. Used by the EDA (which reports
 the repair) and by the cleaning step.
 """
+from typing import Any
+
 import pandas as pd
 
 from .load import to_number
 
 
-def find_broken_rows(raw):
+def find_broken_rows(raw: pd.DataFrame) -> tuple[list[tuple[int, int | None]], set[int]]:
     """Locate the halves. `raw` must have a 0..n-1 index (reset_index).
 
     Returns (pairs, second_halves): pairs is a list of (first_index,
@@ -28,7 +30,8 @@ def find_broken_rows(raw):
     return pairs, second_halves
 
 
-def stitch(first, second, columns):
+def stitch(first: pd.Series, second: pd.Series,
+           columns: list[str]) -> tuple[dict[str, Any], str, list[str]]:
     """Join a first and second half into one record.
 
     The first half is kept up to its last filled column (where the split is);
@@ -54,7 +57,7 @@ def stitch(first, second, columns):
     return stitched, columns[k], leftover
 
 
-def repair_broken_rows(raw):
+def repair_broken_rows(raw: pd.DataFrame) -> tuple[pd.DataFrame, int, int]:
     """Return (repaired DataFrame, number of records repaired, number dropped).
 
     Halves that cannot be stitched cleanly are dropped instead.

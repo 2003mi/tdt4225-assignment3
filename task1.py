@@ -16,7 +16,7 @@ from src.eda import run_eda
 from src.paths import DATA_DIR
 
 
-def clean_and_insert(data_dir, small):
+def clean_and_insert(data_dir: Path, small: bool) -> None:
     connection = DbConnector()
     db = connection.db
     try:
@@ -31,7 +31,7 @@ def clean_and_insert(data_dir, small):
         print("\n=== Cleaning + inserting users (streaming ratings) ===")
         link_map = clean.build_link_map(movie_docs, data_dir)
         genre_lookup = clean.build_genre_lookup(movie_docs)
-        stats = Counter()
+        stats: Counter[str] = Counter()
         users = clean.iter_user_documents(link_map, genre_lookup, data_dir, small, stats)
         insert.insert_users(db, users)
 
@@ -42,7 +42,7 @@ def clean_and_insert(data_dir, small):
         connection.close_connection()
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--small", action="store_true",

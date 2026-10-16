@@ -13,6 +13,9 @@ This step runs before the rest of the EDA so that no movies are lost:
 Finding: all three records stitch cleanly and pass every check, so they are
 repaired instead of dropped.
 """
+from pathlib import Path
+from typing import Any
+
 import pandas as pd
 
 from ..repair import find_broken_rows, repair_broken_rows, stitch
@@ -24,7 +27,7 @@ MAX_CHARS = 400  # per raw line
 STATUSES = {"Released", "Rumored", "Post Production", "In Production", "Planned", "Canceled", None}
 
 
-def show_raw_lines(lines, needle, context=1):
+def show_raw_lines(lines: list[bytes], needle: bytes, context: int = 1) -> None:
     """Print the physical lines containing `needle`, plus neighbours, with repr()."""
     hits = [i for i, line in enumerate(lines) if needle in line]
     if not hits:
@@ -39,7 +42,7 @@ def show_raw_lines(lines, needle, context=1):
         print(f"{marker} line {j + 1:>6}: {text}")
 
 
-def sanity(stitched):
+def sanity(stitched: dict[str, Any]) -> list[tuple[str, bool, Any]]:
     checks = []
     for col in ("id", "budget", "revenue", "runtime", "popularity", "vote_average", "vote_count"):
         v = stitched.get(col)
@@ -53,7 +56,7 @@ def sanity(stitched):
     return checks
 
 
-def run(raw, data_dir):
+def run(raw: pd.DataFrame, data_dir: Path) -> pd.DataFrame:
     """Report on the broken records and return the repaired metadata."""
     section("Broken records in movies_metadata.csv (repaired before the rest of the EDA)")
     raw = raw.reset_index(drop=True)

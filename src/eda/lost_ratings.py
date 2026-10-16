@@ -25,7 +25,7 @@ from .common import section, show
 REASONS = ["ok", "no tmdbId", "tmdbId not in metadata", "imdb mismatch"]
 
 
-def classify_links(raw_links, meta):
+def classify_links(raw_links: pd.DataFrame, meta: pd.DataFrame) -> pd.DataFrame:
     """Return links.csv with integer ids, imdb_num and a 'reason' column."""
     links = raw_links.copy()
     links["movieId"] = to_number(links["movieId"]).astype(int)
@@ -43,7 +43,7 @@ def classify_links(raw_links, meta):
     return links
 
 
-def run(raw_links, meta, movie_counts):
+def run(raw_links: pd.DataFrame, meta: pd.DataFrame, movie_counts: pd.Series) -> None:
     """movie_counts: ratings per movieId, from core.eda_ratings."""
     section("Extra: ratings lost when linking to movies")
     links = classify_links(raw_links, meta)

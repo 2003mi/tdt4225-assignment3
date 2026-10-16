@@ -21,6 +21,7 @@ The functions take already-loaded DataFrames (see run.py); movies_metadata.csv
 is passed in after the broken rows have been repaired (broken_rows.py).
 """
 from collections import Counter
+from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -31,7 +32,7 @@ from .common import (BAR, GENDER, INK_2, hbar, hist, log_bins, pct, save_plot,
                      section, show, subsection)
 
 
-def _check_ids(raw, name):
+def _check_ids(raw: pd.DataFrame, name: str) -> tuple[pd.DataFrame, pd.Series]:
     """Check the id column, which every join between the files depends on.
 
     - Non-numeric ids: in movies_metadata.csv these are the rows where a
@@ -64,7 +65,7 @@ def _check_ids(raw, name):
 NUMERIC = ["budget", "revenue", "runtime", "vote_average", "vote_count", "popularity"]
 
 
-def eda_metadata(raw):
+def eda_metadata(raw: pd.DataFrame) -> pd.DataFrame:
     """movies_metadata.csv - one row per movie, the main file.
 
     Structure
@@ -122,7 +123,7 @@ def eda_metadata(raw):
 
     # Rows that share an id but are not identical: which columns differ?
     dup = df[df["id"].duplicated(keep=False)]
-    differing = Counter()
+    differing: Counter[str] = Counter()
     for _, group in dup.groupby("id"):
         if len(group.drop_duplicates()) > 1:
             for col in group.columns:
@@ -286,7 +287,7 @@ def eda_metadata(raw):
 # credits.csv
 # ----------------------------------------------------------------------------
 
-def eda_credits(raw, movie_ids):
+def eda_credits(raw: pd.DataFrame, movie_ids: set[int]) -> pd.DataFrame:
     """credits.csv - one row per movie with its full cast and crew lists.
 
     Structure
@@ -331,8 +332,12 @@ def eda_credits(raw, movie_ids):
           f"Metadata movies without credits: {len(movie_ids - ids):,}")
 
     df = df.drop_duplicates("id")
-    actor_movies, director_movies = Counter(), Counter()
-    gender_all, gender_top5, jobs, directors_per_movie = Counter(), Counter(), Counter(), Counter()
+    actor_movies: Counter[int] = Counter()       # person id -> movies
+    director_movies: Counter[int] = Counter()    # person id -> movies
+    gender_all: Counter[int] = Counter()         # gender code -> cast entries
+    gender_top5: Counter[int] = Counter()
+    jobs: Counter[str] = Counter()               # crew job -> entries
+    directors_per_movie: Counter[int] = Counter()  # 0, 1, 2 (= 2 or more) -> movies
     missing_order = 0
     for cast, crew in zip(df["cast"], df["crew"]):
         cast, crew = cast or [], crew or []
@@ -366,7 +371,7 @@ def eda_credits(raw, movie_ids):
     fig, ax = plt.subplots(figsize=(7, 1.9))
     for y, (label, counts) in enumerate((("All cast", gender_all), ("Top-5 billed", gender_top5))):
         total = sum(counts.values()) or 1
-        left = 0
+        left = 0.0
         for g in (1, 2, 0):
             name, color = GENDER[g]
             share = 100 * counts.get(g, 0) / total
@@ -392,7 +397,7 @@ def eda_credits(raw, movie_ids):
 # keywords.csv
 # ----------------------------------------------------------------------------
 
-def eda_keywords(raw, movie_ids):
+def eda_keywords(raw: pd.DataFrame, movie_ids: set[int]) -> None:
     """keywords.csv - one row per movie with a list of plot keywords.
 
     - Valid and duplicate ids.
@@ -419,7 +424,7 @@ def eda_keywords(raw, movie_ids):
 # links.csv
 # ----------------------------------------------------------------------------
 
-def eda_links(raw, meta):
+def eda_links(raw: pd.DataFrame, meta: pd.DataFrame) -> dict[int, int]:
     """links.csv - maps MovieLens movieId (used in ratings) to tmdbId (the
     id in metadata) and imdbId. It is the only bridge between the ratings
     and the movies, so its quality decides how much of Q10 is usable.
@@ -492,7 +497,7 @@ def eda_links(raw, meta):
 # ratings.csv (read in chunks)
 # ----------------------------------------------------------------------------
 
-def eda_ratings(data_dir, small, link_map):
+def eda_ratings(data_dir: Path, small: bool, link_map: dict[int, int]) -> pd.Series:
     """ratings.csv - one row per (user, movie) rating from MovieLens.
 
     The full file has ~26M rows, so it is read in chunks of 1M rows and only

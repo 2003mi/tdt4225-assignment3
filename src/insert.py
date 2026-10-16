@@ -17,33 +17,42 @@ Both collections are dropped first, so the script can be rerun safely.
 
 Status: functions marked TODO are skeletons to fill in. The rest is done.
 """
+from collections import Counter
+from collections.abc import Iterable, Iterator
 from itertools import islice
 from pprint import pprint
+from typing import TypeVar
+
+from pymongo.database import Database
+
+from .schema import MovieDoc, UserDoc
+
+T = TypeVar("T")
 
 BATCH_SIZE = 5_000  # documents per insert_many call
 
 
-def reset_collections(db):
+def reset_collections(db: Database) -> None:
     """Drop movies and users so a rerun starts from scratch."""
     for name in ("movies", "users"):
         db[name].drop()
     print("Dropped collections: movies, users")
 
 
-def batched(iterable, size=BATCH_SIZE):
+def batched(iterable: Iterable[T], size: int = BATCH_SIZE) -> Iterator[list[T]]:
     """Yield lists of up to `size` items (works on generators, too)."""
     it = iter(iterable)
     while batch := list(islice(it, size)):
         yield batch
 
 
-def insert_movies(db, movie_docs):
+def insert_movies(db: Database, movie_docs: list[MovieDoc]) -> None:
     for batch in batched(movie_docs):
         db.movies.insert_many(batch, ordered=False)
     print(f"Inserted {db.movies.count_documents({}):,} movies")
 
 
-def create_indexes(db):
+def create_indexes(db: Database) -> None:
     """Indexes are created after the bulk insert (faster than updating them per insert).
 
     _id is always indexed. The text index is required for Q7.
@@ -52,7 +61,7 @@ def create_indexes(db):
     print("Created text index on movies.overview + movies.tagline")
 
 
-def insert_users(db, user_docs):
+def insert_users(db: Database, user_docs: Iterable[UserDoc]) -> None:
     """Insert user documents from a generator, in batches, printing progress."""
     inserted = 0
     for batch in batched(user_docs):
@@ -62,7 +71,8 @@ def insert_users(db, user_docs):
     print(f"Inserted {inserted:,} users" + " " * 20)
 
 
-def verify(db, stats, expected_movies, expected_ratings=None):
+def verify(db: Database, stats: Counter[str], expected_movies: int,
+           expected_ratings: int | None = None) -> None:
     """TODO: check the database against the expected numbers and print evidence for the report.
 
     - movies: count_documents({}) == expected_movies

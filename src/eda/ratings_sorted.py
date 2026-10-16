@@ -12,6 +12,8 @@ grouped by userId. The chunked duplicate check in the main EDA relies on this,
 and so does building one document per user during insert.
 """
 import time
+from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -19,7 +21,7 @@ import pandas as pd
 from .common import section
 
 
-def check(path, chunksize=1_000_000):
+def check(path: Path, chunksize: int = 1_000_000) -> dict[str, Any]:
     rows = nulls = descending = reappearing = 0
     first_descending = first_reappearing = None
     seen = set()   # users whose block has started
@@ -69,7 +71,7 @@ def check(path, chunksize=1_000_000):
     }
 
 
-def run(data_dir, small=False):
+def run(data_dir: Path, small: bool = False) -> None:
     name = "ratings_small.csv" if small else "ratings.csv"
     section(f"Extra: is {name} sorted by userId?")
     r = check(data_dir / name)

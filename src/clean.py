@@ -19,6 +19,9 @@ Status: functions marked TODO are skeletons to fill in. The rest is done.
 """
 import math
 from collections import Counter
+from collections.abc import Iterator
+from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -27,6 +30,8 @@ from .load import (iter_ratings, load_credits, load_keywords, load_links, load_m
                    parse_literal, to_number)
 from .paths import DATA_DIR
 from .repair import repair_broken_rows
+from .schema import (CastMember, CrewMember, Genre, MovieDoc, RawCastEntry, RawCrewEntry,
+                     UserDoc)
 
 # --- Expected results on the full dataset (from the EDA) --------------------
 EXPECTED_MOVIES = 45_433            # 45,466 rows - 3 second halves - 30 duplicate rows
@@ -49,7 +54,7 @@ CREW_FIELDS = ["id", "name", "job", "department"]
 # Movies
 # =============================================================================
 
-def clean_metadata(data_dir=DATA_DIR):
+def clean_metadata(data_dir: Path = DATA_DIR) -> pd.DataFrame:
     """movies_metadata.csv -> one cleaned row per movie (45,433)."""
     raw = load_metadata(data_dir)
     df, repaired, dropped = repair_broken_rows(raw)
@@ -64,7 +69,7 @@ def clean_metadata(data_dir=DATA_DIR):
     return df.drop(columns=DROP_COLUMNS)
 
 
-def drop_duplicate_ids(df):
+def drop_duplicate_ids(df: pd.DataFrame) -> pd.DataFrame:
     """TODO: id -> int, keep one row per id (the one with the highest vote_count).
 
     Hint: sort by the numeric vote_count descending, then drop_duplicates("id").
@@ -73,7 +78,7 @@ def drop_duplicate_ids(df):
     raise NotImplementedError
 
 
-def convert_types(df):
+def convert_types(df: pd.DataFrame) -> pd.DataFrame:
     """TODO: text -> real types.
 
     - INT_COLUMNS -> "Int64" (pandas integer that allows missing values)
@@ -85,7 +90,7 @@ def convert_types(df):
     raise NotImplementedError
 
 
-def apply_null_rules(df):
+def apply_null_rules(df: pd.DataFrame) -> pd.DataFrame:
     """TODO: values that mean "unknown" -> missing.
 
     - budget, revenue: < MONEY_MIN -> missing, each column on its own
@@ -99,7 +104,7 @@ def apply_null_rules(df):
     raise NotImplementedError
 
 
-def parse_nested(df):
+def parse_nested(df: pd.DataFrame) -> pd.DataFrame:
     """TODO: Python-literal strings -> lists/dicts.
 
     - genres, production_companies, production_countries, spoken_languages:
@@ -111,7 +116,7 @@ def parse_nested(df):
     raise NotImplementedError
 
 
-def clean_credits(data_dir=DATA_DIR):
+def clean_credits(data_dir: Path = DATA_DIR) -> pd.DataFrame:
     """TODO: credits.csv -> DataFrame with columns id, cast, crew (one row per movie).
 
     - id -> int, drop_duplicates("id") (44 rows; the 7 differing copies only
@@ -122,7 +127,7 @@ def clean_credits(data_dir=DATA_DIR):
     raise NotImplementedError
 
 
-def group_cast(cast):
+def group_cast(cast: list[RawCastEntry]) -> list[CastMember]:
     """TODO: one entry per person, sorted by billing order.
 
     Input:  [{"id": 3, "name": .., "gender": 2, "order": 0, "character": "A", ...}, ...]
@@ -136,12 +141,12 @@ def group_cast(cast):
     raise NotImplementedError
 
 
-def trim_crew(crew):
+def trim_crew(crew: list[RawCrewEntry]) -> list[CrewMember]:
     """TODO: keep only CREW_FIELDS for each crew entry. (No duplicates to remove.)"""
     raise NotImplementedError
 
 
-def clean_keywords(data_dir=DATA_DIR):
+def clean_keywords(data_dir: Path = DATA_DIR) -> pd.DataFrame:
     """TODO: keywords.csv -> DataFrame with columns id, keywords.
 
     - id -> int, drop exact duplicates (987 rows)
@@ -150,7 +155,8 @@ def clean_keywords(data_dir=DATA_DIR):
     raise NotImplementedError
 
 
-def build_movies(meta, credits, keywords):
+def build_movies(meta: pd.DataFrame, credits: pd.DataFrame,
+                 keywords: pd.DataFrame) -> pd.DataFrame:
     """TODO: merge into one row per movie.
 
     meta.merge(credits, on="id", how="left", validate="one_to_one")
@@ -160,18 +166,18 @@ def build_movies(meta, credits, keywords):
     raise NotImplementedError
 
 
-def to_movie_documents(movies):
+def to_movie_documents(movies: pd.DataFrame) -> list[MovieDoc]:
     """One dict per movie, ready for insert_many. _id = TMDB id."""
-    docs = []
+    docs: list[MovieDoc] = []
     for row in movies.to_dict("records"):
         doc = {k: to_python(v) for k, v in row.items()}
         doc["_id"] = doc.pop("id")
-        docs.append(doc)
+        docs.append(doc)  # type: ignore[arg-type]  # built from the cleaned columns
     assert len(docs) == len({d["_id"] for d in docs}), "duplicate _id in movie documents"
     return docs
 
 
-def clean_movies(data_dir=DATA_DIR):
+def clean_movies(data_dir: Path = DATA_DIR) -> list[MovieDoc]:
     """Run the whole movies pipeline and return the documents."""
     meta = clean_metadata(data_dir)
     movies = build_movies(meta, clean_credits(data_dir), clean_keywords(data_dir))
@@ -184,7 +190,7 @@ def clean_movies(data_dir=DATA_DIR):
 # Users (ratings)
 # =============================================================================
 
-def build_link_map(movie_docs, data_dir=DATA_DIR):
+def build_link_map(movie_docs: list[MovieDoc], data_dir: Path = DATA_DIR) -> dict[int, int]:
     """TODO: links.csv -> {movieId: tmdbId}.
 
     Keep a link only if tmdbId is present, tmdbId is one of the movies, and
@@ -198,12 +204,14 @@ def build_link_map(movie_docs, data_dir=DATA_DIR):
     raise NotImplementedError
 
 
-def build_genre_lookup(movie_docs):
+def build_genre_lookup(movie_docs: list[MovieDoc]) -> dict[int, list[Genre]]:
     """{tmdbId: [{"id", "name"}, ...]} - genres copied into every rating."""
     return {d["_id"]: d["genres"] for d in movie_docs}
 
 
-def iter_user_documents(link_map, genre_lookup, data_dir=DATA_DIR, small=False, stats=None):
+def iter_user_documents(link_map: dict[int, int], genre_lookup: dict[int, list[Genre]],
+                        data_dir: Path = DATA_DIR, small: bool = False,
+                        stats: Counter[str] | None = None) -> Iterator[UserDoc]:
     """TODO: stream ratings.csv and yield one document per user.
 
     Document: {"_id": userId,
@@ -229,7 +237,7 @@ def iter_user_documents(link_map, genre_lookup, data_dir=DATA_DIR, small=False, 
 # Helpers (done)
 # =============================================================================
 
-def to_python(value):
+def to_python(value: Any) -> Any:
     """Convert pandas/numpy values to what pymongo can store.
 
     NaN/NaT/pd.NA -> None, numpy numbers -> int/float, Timestamp -> datetime,

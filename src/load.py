@@ -4,7 +4,9 @@ Everything is read as strings first, so the EDA can see exactly which values
 fail to parse instead of pandas silently guessing types.
 """
 import ast
+from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 
@@ -12,7 +14,7 @@ from .paths import DATA_DIR
 
 # Columns in movies_metadata.csv stored as Python literals, e.g.
 # "[{'id': 16, 'name': 'Animation'}]" (single quotes, so not valid JSON)
-METADATA_NESTED = {
+METADATA_NESTED: dict[str, type] = {
     "genres": list,
     "production_companies": list,
     "production_countries": list,
@@ -21,9 +23,12 @@ METADATA_NESTED = {
 }
 
 
-def parse_literal(value, expected=(list, dict)):
-    """Parse a Python-literal string. Returns None if it is missing,
-    unparseable, or not of the expected type."""
+def parse_literal(value: Any, expected: type | tuple[type, ...] = (list, dict)) -> Any:
+    """Parse a Python-literal string such as "[{'id': 16, 'name': 'Animation'}]".
+
+    Returns the parsed object (a list or dict), or None if the value is
+    missing, unparseable, or not of the expected type.
+    """
     if not isinstance(value, str) or not value.strip():
         return None
     try:
@@ -33,12 +38,12 @@ def parse_literal(value, expected=(list, dict)):
     return obj if isinstance(obj, expected) else None
 
 
-def to_number(series):
+def to_number(series: pd.Series) -> pd.Series:
     """Convert a string column to numbers; unparseable values become NaN."""
     return pd.to_numeric(series, errors="coerce")
 
 
-def read_csv_str(filename, data_dir=DATA_DIR, **kwargs):
+def read_csv_str(filename: str, data_dir: Path = DATA_DIR, **kwargs: Any) -> pd.DataFrame:
     """Read a CSV with every column as string. Empty fields become NaN."""
     path = Path(data_dir) / filename
     if not path.exists():
@@ -46,24 +51,29 @@ def read_csv_str(filename, data_dir=DATA_DIR, **kwargs):
     return pd.read_csv(path, dtype=str, keep_default_na=False, na_values=[""], **kwargs)
 
 
-def load_metadata(data_dir=DATA_DIR):
+def load_metadata(data_dir: Path = DATA_DIR) -> pd.DataFrame:
     return read_csv_str("movies_metadata.csv", data_dir)
 
 
-def load_credits(data_dir=DATA_DIR):
+def load_credits(data_dir: Path = DATA_DIR) -> pd.DataFrame:
     return read_csv_str("credits.csv", data_dir)
 
 
-def load_keywords(data_dir=DATA_DIR):
+def load_keywords(data_dir: Path = DATA_DIR) -> pd.DataFrame:
     return read_csv_str("keywords.csv", data_dir)
 
 
-def load_links(data_dir=DATA_DIR, small=False):
+def load_links(data_dir: Path = DATA_DIR, small: bool = False) -> pd.DataFrame:
     return read_csv_str("links_small.csv" if small else "links.csv", data_dir)
 
 
-def iter_ratings(data_dir=DATA_DIR, small=False, chunksize=1_000_000):
-    """Yield ratings in chunks so the full 26M-row file never sits in memory at once."""
+def iter_ratings(data_dir: Path = DATA_DIR, small: bool = False,
+                 chunksize: int = 1_000_000) -> Iterator[pd.DataFrame]:
+    """Yield ratings in chunks so the full 26M-row file never sits in memory at once.
+
+    Each chunk has the columns userId (int32), movieId (int32), rating (float32)
+    and timestamp (int64, Unix seconds).
+    """
     path = Path(data_dir) / ("ratings_small.csv" if small else "ratings.csv")
     if not path.exists():
         raise FileNotFoundError(f"{path} not found")
