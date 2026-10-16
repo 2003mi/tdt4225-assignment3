@@ -1,13 +1,8 @@
-"""Exploratory data analysis of The Movies Dataset.
+"""Main EDA: one function per CSV file.
 
-Prints tables to the terminal (screenshot these for the report) and saves
-plots to output/eda/.
-
-Approach
---------
-Every CSV is first read with all columns as text (see src/load.py). That way
-nothing is silently converted, and we can count exactly which values fail to
-become numbers, dates or lists. For each file we look at four things:
+Every CSV is read with all columns as text (see src/load.py), so nothing is
+silently converted and we can count exactly which values fail to become
+numbers, dates or lists. For each file we look at four things:
 
 1. Structure   - row/column counts, whether the id column is valid, duplicates.
 2. Missing     - empty fields (NaN), but also values that *look* filled in and
@@ -21,112 +16,19 @@ become numbers, dates or lists. For each file we look at four things:
 
 Numbers that directly matter for a Part 2 query (e.g. how many directors have
 >= 5 movies for Q1) are printed so the query results can be sanity-checked.
+
+The functions take already-loaded DataFrames (see run.py); movies_metadata.csv
+is passed in after the broken rows have been repaired (broken_rows.py).
 """
 from collections import Counter
 
-import matplotlib
-
-matplotlib.use("Agg")  # write files only, no window
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from tabulate import tabulate
 
-from .load import (METADATA_NESTED, iter_ratings, load_credits, load_keywords,
-                   load_links, load_metadata, parse_literal, to_number)
-from .paths import DATA_DIR, OUTPUT_DIR
-
-PLOT_DIR = OUTPUT_DIR / "eda"
-
-# Plot colours
-BAR = "#2a78d6"
-INK = "#0b0b0b"
-INK_2 = "#52514e"
-GRID = "#e4e3df"
-GENDER = {1: ("Female", "#2a78d6"), 2: ("Male", "#eb6834"), 0: ("Unknown", "#a3a29c")}
-
-
-# ----------------------------------------------------------------------------
-# Printing / plotting helpers
-# ----------------------------------------------------------------------------
-
-def section(title):
-    print("\n" + "=" * 72)
-    print(title)
-    print("=" * 72)
-
-
-def subsection(title):
-    print(f"\n--- {title} ---")
-
-
-def show(data, headers="keys", **kwargs):
-    if isinstance(data, pd.DataFrame):
-        if headers == "keys":
-            headers = list(data.columns)
-        data = data.astype(object).values.tolist()
-    rows = [list(r) for r in data]
-    # Columns holding text are printed as-is. Without this, tabulate 0.9 tries to
-    # apply the "," number format to strings like "1" and crashes.
-    n_cols = max((len(r) for r in rows), default=0)
-    text_cols = [i for i in range(n_cols) if any(isinstance(r[i], str) for r in rows if i < len(r))]
-    print(tabulate(rows, headers=headers, tablefmt="simple", floatfmt=",.2f",
-                   intfmt=",", disable_numparse=text_cols, **kwargs))
-
-
-def pct(n, total):
-    return f"{100 * n / total:.1f}%" if total else "-"
-
-
-def _style():
-    plt.rcParams.update({
-        "figure.dpi": 110, "savefig.dpi": 150, "savefig.bbox": "tight",
-        "font.size": 9, "axes.titlesize": 11, "axes.titleweight": "bold",
-        "axes.titlelocation": "left", "text.color": INK,
-        "axes.edgecolor": GRID, "axes.labelcolor": INK_2,
-        "xtick.color": INK_2, "ytick.color": INK_2,
-        "axes.spines.top": False, "axes.spines.right": False,
-        "axes.grid": True, "grid.color": GRID, "grid.linewidth": 0.8,
-        "axes.axisbelow": True,
-    })
-
-
-def _save(fig, name):
-    PLOT_DIR.mkdir(parents=True, exist_ok=True)
-    path = PLOT_DIR / name
-    fig.savefig(path)
-    plt.close(fig)
-    print(f"  [plot saved] output/eda/{name}")
-
-
-def _hbar(labels, values, title, xlabel, name, fmt="{:,.0f}"):
-    fig, ax = plt.subplots(figsize=(7, 0.28 * len(labels) + 1.2))
-    y = np.arange(len(labels))
-    ax.barh(y, values, color=BAR, height=0.72)
-    ax.set_yticks(y, labels)
-    ax.invert_yaxis()
-    ax.grid(axis="y", visible=False)
-    ax.set_xlabel(xlabel)
-    ax.set_title(title)
-    xmax = max(values) if len(values) else 1
-    for yi, v in zip(y, values):
-        ax.text(v + xmax * 0.01, yi, fmt.format(v), va="center", fontsize=8, color=INK_2)
-    ax.set_xlim(0, xmax * 1.15)
-    _save(fig, name)
-
-
-def _log_bins(values, n=40):
-    lo, hi = max(values.min(), 1), max(values.max(), 2)
-    return np.logspace(np.log10(lo), np.log10(hi), n)
-
-
-def _hist(ax, values, bins, title, xlabel, log_x=False):
-    ax.hist(values, bins=bins, color=BAR, edgecolor="white", linewidth=0.6)
-    if log_x:
-        ax.set_xscale("log")
-    ax.set_title(title)
-    ax.set_xlabel(xlabel)
-    ax.set_ylabel("Movies")
+from ..load import METADATA_NESTED, iter_ratings, parse_literal, to_number
+from .common import (BAR, GENDER, INK_2, hbar, hist, log_bins, pct, save_plot,
+                     section, show, subsection)
 
 
 def _check_ids(raw, name):
@@ -162,12 +64,13 @@ def _check_ids(raw, name):
 NUMERIC = ["budget", "revenue", "runtime", "vote_average", "vote_count", "popularity"]
 
 
-def eda_metadata(data_dir):
+def eda_metadata(raw):
     """movies_metadata.csv - one row per movie, the main file.
 
     Structure
-      - Malformed rows (id is a date) are printed so they can be inspected,
-        and duplicate ids are counted. For ids that occur more than once but
+      - The rows split by a line break have already been repaired
+        (broken_rows.py), so "non-numeric id" should be 0 here; any that
+        remain are printed. Duplicate ids are counted. For ids that occur more than once but
         are not exact copies, we list which columns differ between the copies.
 
     Missing values
@@ -210,8 +113,7 @@ def eda_metadata(data_dir):
     Returns the metadata with numeric columns converted, dates parsed and
     nested columns as Python lists/dicts.
     """
-    section("movies_metadata.csv")
-    raw = load_metadata(data_dir)
+    section("movies_metadata.csv (after repairing the broken rows)")
     df, bad = _check_ids(raw, "metadata")
 
     if bad.any():
@@ -251,7 +153,7 @@ def eda_metadata(data_dir):
     unknown = (missing_tbl.set_index("column")["missing"]
                + missing_tbl.set_index("column")["0 or empty []"]) / n * 100
     unknown = unknown[unknown > 0].sort_values(ascending=False)
-    _hbar(list(unknown.index), list(unknown.values),
+    hbar(list(unknown.index), list(unknown.values),
           "Share of movies with a missing or unknown value",
           "% of movies (missing, 0, or empty list)", "metadata_missing.png",
           fmt="{:.1f}%")
@@ -298,22 +200,22 @@ def eda_metadata(data_dir):
     ax.set_title("Movies released per year")
     ax.set_ylabel("Movies")
     ax.set_ylim(bottom=0)
-    _save(fig, "metadata_releases_per_year.png")
+    save_plot(fig, "metadata_releases_per_year.png")
 
     # --- Distributions
     fig, axes = plt.subplots(2, 2, figsize=(9, 6))
     rt = df["runtime"]
-    _hist(axes[0, 0], rt[(rt > 0) & (rt <= 300)], 60, "Runtime", "Minutes (0 < runtime <= 300)")
+    hist(axes[0, 0], rt[(rt > 0) & (rt <= 300)], 60, "Runtime", "Minutes (0 < runtime <= 300)")
     va = df.loc[df["vote_count"] > 0, "vote_average"]
-    _hist(axes[0, 1], va, 20, "vote_average", "Rating 0–10 (movies with >= 1 vote)")
+    hist(axes[0, 1], va, 20, "vote_average", "Rating 0–10 (movies with >= 1 vote)")
     vc = df.loc[df["vote_count"] > 0, "vote_count"]
-    _hist(axes[1, 0], vc, _log_bins(vc), "vote_count", "Votes (log scale)", log_x=True)
+    hist(axes[1, 0], vc, log_bins(vc), "vote_count", "Votes (log scale)", log_x=True)
     rev = df.loc[df["revenue"] > 0, "revenue"]
     if len(rev):
-        _hist(axes[1, 1], rev, _log_bins(rev), "revenue", "USD (log scale, revenue > 0)",
+        hist(axes[1, 1], rev, log_bins(rev), "revenue", "USD (log scale, revenue > 0)",
               log_x=True)
     fig.tight_layout()
-    _save(fig, "metadata_distributions.png")
+    save_plot(fig, "metadata_distributions.png")
 
     # --- Categorical columns
     subsection("Categorical columns")
@@ -349,7 +251,7 @@ def eda_metadata(data_dir):
     show([[g, c, int(primary.get(g, 0))] for g, c in genre_counts.most_common()],
          headers=["genre", "movies (any position)", "movies (primary = first)"])
     top = genre_counts.most_common()
-    _hbar([g for g, _ in top], [c for _, c in top], "Movies per genre",
+    hbar([g for g, _ in top], [c for _, c in top], "Movies per genre",
           "Movies (a movie counts once for each of its genres)", "metadata_genres.png")
 
     # Collections
@@ -384,7 +286,7 @@ def eda_metadata(data_dir):
 # credits.csv
 # ----------------------------------------------------------------------------
 
-def eda_credits(data_dir, movie_ids):
+def eda_credits(raw, movie_ids):
     """credits.csv - one row per movie with its full cast and crew lists.
 
     Structure
@@ -393,6 +295,8 @@ def eda_credits(data_dir, movie_ids):
         empty lists, and the median/max list length.
       - Join check: credit ids missing from metadata, and metadata movies
         that have no credits row.
+
+    Returns the credits with cast/crew parsed into lists, one row per movie.
 
     People (counted once per movie, after dropping duplicate movie ids)
       - Distinct actors, and how many have >= 10 movies (Q3).
@@ -412,7 +316,6 @@ def eda_credits(data_dir, movie_ids):
         the cast size suggests.
     """
     section("credits.csv")
-    raw = load_credits(data_dir)
     df, _ = _check_ids(raw, "credits")
 
     df["cast"] = df["cast"].map(lambda v: parse_literal(v, list))
@@ -481,14 +384,15 @@ def eda_credits(data_dir, movie_ids):
     ax.set_title("Cast gender", pad=22)
     ax.legend(ncol=3, frameon=False, loc="lower left", bbox_to_anchor=(0, 1.0),
               borderaxespad=0.2, fontsize=8)
-    _save(fig, "credits_gender.png")
+    save_plot(fig, "credits_gender.png")
+    return df[["id", "cast", "crew"]]
 
 
 # ----------------------------------------------------------------------------
 # keywords.csv
 # ----------------------------------------------------------------------------
 
-def eda_keywords(data_dir, movie_ids):
+def eda_keywords(raw, movie_ids):
     """keywords.csv - one row per movie with a list of plot keywords.
 
     - Valid and duplicate ids.
@@ -500,7 +404,6 @@ def eda_keywords(data_dir, movie_ids):
     and decide whether keywords are worth embedding in the movie documents.
     """
     section("keywords.csv")
-    raw = load_keywords(data_dir)
     df, _ = _check_ids(raw, "keywords")
     parsed = df["keywords"].map(lambda v: parse_literal(v, list))
     failed = int((df["keywords"].notna() & parsed.isna()).sum())
@@ -516,33 +419,73 @@ def eda_keywords(data_dir, movie_ids):
 # links.csv
 # ----------------------------------------------------------------------------
 
-def eda_links(data_dir, movie_ids, small):
+def eda_links(raw, meta):
     """links.csv - maps MovieLens movieId (used in ratings) to tmdbId (the
     id in metadata) and imdbId. It is the only bridge between the ratings
     and the movies, so its quality decides how much of Q10 is usable.
 
+    The full links.csv is always used, also with --small: it covers every
+    MovieLens movie, while links_small.csv only covers the ~9k movies in
+    ratings_small.csv.
+
     - Missing tmdbId / imdbId: those MovieLens movies cannot be joined.
     - Duplicate movieId or tmdbId: a duplicate would make one rating count
-      for two movies, or two MovieLens movies share one TMDB movie.
-    - How many tmdbIds actually exist in the metadata.
+      for two movies, or two MovieLens movies share one TMDB movie. This
+      decides whether movieId can be stored as a single field on a movie.
+    - How many tmdbIds exist in the metadata, and how many metadata movies
+      have no link at all.
+    - imdb cross-check: links.csv has its own imdbId ("0114709") and the
+      metadata has imdb_id ("tt0114709"). If a link's tmdbId points to a
+      movie with a different imdb id, that link most likely points to the
+      wrong movie, and its ratings would be counted for the wrong film.
 
     Returns a dict {movieId: tmdbId} for links that point at a known movie,
     used to measure join coverage in eda_ratings.
     """
-    name = "links_small.csv" if small else "links.csv"
-    section(name)
-    raw = load_links(data_dir, small)
+    section("links.csv")
     movie_id = to_number(raw["movieId"])
     tmdb = to_number(raw["tmdbId"])
     n = len(raw)
+    movie_ids = set(meta["id"])
     print(f"Rows: {n:,}")
     print(f"Missing tmdbId: {int(tmdb.isna().sum()):,}   Missing imdbId: {int(raw['imdbId'].isna().sum()):,}")
     print(f"Duplicate movieId: {int(movie_id.duplicated().sum()):,}   "
           f"Duplicate tmdbId: {int(tmdb.dropna().duplicated().sum()):,}")
+
     in_meta = tmdb.isin(movie_ids)
+    linked = set(tmdb[in_meta].astype(int))
     print(f"tmdbId found in metadata: {int(in_meta.sum()):,} ({pct(in_meta.sum(), n)})")
+    print(f"Metadata movies with no link (cannot get any ratings): {len(movie_ids - linked):,}")
+
+    # tmdbIds shared by several MovieLens movies
+    shared = raw.assign(tmdb=tmdb).dropna(subset=["tmdb"])
+    shared = shared[shared["tmdb"].duplicated(keep=False)].sort_values("tmdb")
+    if len(shared):
+        subsection("tmdbIds used by more than one movieId (first 10)")
+        show(shared[["movieId", "imdbId", "tmdbId"]].head(10))
+
+    # imdb cross-check between links.csv and movies_metadata.csv
+    meta_imdb = (meta.drop_duplicates("id").set_index("id")
+                 .assign(imdb_num=lambda m: to_number(m["imdb_id"].str.removeprefix("tt"))))
     ok = movie_id.notna() & in_meta
-    return dict(zip(movie_id[ok].astype(int), tmdb[ok].astype(int)))
+    check = pd.DataFrame({
+        "movieId": movie_id[ok].astype(int),
+        "tmdbId": tmdb[ok].astype(int),
+        "imdbId (links)": to_number(raw.loc[ok, "imdbId"]),
+    })
+    check["imdb_id (metadata)"] = check["tmdbId"].map(meta_imdb["imdb_id"])
+    check["title"] = check["tmdbId"].map(meta_imdb["title"])
+    known = check["imdbId (links)"].notna() & check["tmdbId"].map(meta_imdb["imdb_num"]).notna()
+    mismatch = known & (check["imdbId (links)"] != check["tmdbId"].map(meta_imdb["imdb_num"]))
+    print(f"Linked movies where the imdb id in links.csv and metadata disagree: "
+          f"{int(mismatch.sum()):,} of {int(known.sum()):,} comparable")
+    if mismatch.any():
+        bad = check[mismatch].copy()
+        bad["imdbId (links)"] = "tt" + bad["imdbId (links)"].astype(int).astype(str).str.zfill(7)
+        bad["title"] = bad["title"].str.slice(0, 40)
+        show(bad.head(10))
+
+    return dict(zip(check["movieId"], check["tmdbId"]))
 
 
 # ----------------------------------------------------------------------------
@@ -569,6 +512,8 @@ def eda_ratings(data_dir, small, link_map):
     - Join coverage: how many rated movies, and how many ratings, can be
       followed through links to a movie in metadata. Ratings that cannot
       be joined have no genres and are lost for Q10.
+
+    Returns the number of ratings per movieId (used by lost_ratings.py).
     """
     name = "ratings_small.csv" if small else "ratings.csv"
     section(name)
@@ -637,27 +582,15 @@ def eda_ratings(data_dir, small, link_map):
     ax.set_xlabel("Rating")
     ax.set_ylabel("Ratings (millions)" if total > 1e6 else "Ratings")
     ax.grid(axis="x", visible=False)
-    _save(fig, "ratings_values.png")
+    save_plot(fig, "ratings_values.png")
 
     fig, ax = plt.subplots(figsize=(7, 3))
-    _hist(ax, user_counts, _log_bins(user_counts), "Ratings per user", "Ratings (log scale)",
+    hist(ax, user_counts, log_bins(user_counts), "Ratings per user", "Ratings (log scale)",
           log_x=True)
     ax.set_ylabel("Users")
     ax.axvline(20, color=INK_2, linewidth=1, linestyle="--")
     ax.text(20, ax.get_ylim()[1] * 0.97, " >= 20 ratings (Q10) ", color=INK_2, fontsize=8,
             va="top", bbox={"facecolor": "white", "edgecolor": "none", "pad": 1})
-    _save(fig, "ratings_per_user.png")
+    save_plot(fig, "ratings_per_user.png")
+    return movie_counts
 
-
-# ----------------------------------------------------------------------------
-
-def run_eda(data_dir=DATA_DIR, small=False, include_ratings=True):
-    _style()
-    meta = eda_metadata(data_dir)
-    movie_ids = set(meta["id"])
-    eda_credits(data_dir, movie_ids)
-    eda_keywords(data_dir, movie_ids)
-    link_map = eda_links(data_dir, movie_ids, small)
-    if include_ratings:
-        eda_ratings(data_dir, small, link_map)
-    print(f"\nPlots saved to {PLOT_DIR}")

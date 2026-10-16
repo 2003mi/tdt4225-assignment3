@@ -1,22 +1,22 @@
-"""Check whether the ratings file is sorted by userId.
+"""Extra step 5: is the ratings file sorted and grouped by userId?
 
-    python -m src.check_ratings_sorted            # ratings.csv
-    python -m src.check_ratings_sorted --small    # ratings_small.csv
-
-Reads only the userId column, in chunks, and reports:
+Reads only the userId column, in chunks, and reports
   - whether userId never decreases from one row to the next (sorted),
-  - whether each user's ratings form one contiguous block. A file can be
-    unsorted but still grouped by user, which is enough to build one
-    document per user while streaming,
+  - whether each user's ratings form one contiguous block (grouped). A file
+    can be unsorted but still grouped, which is enough to build one document
+    per user while streaming,
   - the first place the order breaks, as a line number in the CSV.
+
+Finding: ratings.csv (26,024,289 rows, 270,896 users) is both sorted and
+grouped by userId. The chunked duplicate check in the main EDA relies on this,
+and so does building one document per user during insert.
 """
-import argparse
 import time
 
 import numpy as np
 import pandas as pd
 
-from .paths import DATA_DIR
+from .common import section
 
 
 def check(path, chunksize=1_000_000):
@@ -34,18 +34,18 @@ def check(path, chunksize=1_000_000):
 
         # Prepend the last value of the previous chunk so the boundary is checked too.
         full = vals if prev is None else np.concatenate([[prev], vals])
-        offset = 1 if prev is None else 0   # maps a diff position to its row in this chunk
+        offset = 1 if prev is None else 0   # full[k] is this chunk's row k - (1 - offset)
         diffs = np.diff(full)
 
-        # 1. Sorted: userId must never go down
+        # Sorted: userId must never go down
         down = np.flatnonzero(diffs < 0)
         descending += len(down)
         if len(down) and first_descending is None:
-            j = down[0]  # full[j] -> full[j + 1] goes down; full[j + 1] is this chunk's row j + offset
-            first_descending = (lines[j + offset], full[j], full[j + 1])
+            j = down[0]  # full[j] -> full[j + 1] goes down
+            first_descending = (int(lines[j + offset]), full[j], full[j + 1])
 
-        # 2. Grouped: each place the userId changes starts a new block;
-        #    a block for a user we have already seen means the user is split up.
+        # Grouped: every change of userId starts a block; a block for a user
+        # already seen means that user's ratings are split up.
         block_starts = np.flatnonzero(diffs != 0) + 1
         if prev is None:
             block_starts = np.concatenate([[0], block_starts])
@@ -54,7 +54,7 @@ def check(path, chunksize=1_000_000):
             if user in seen:
                 reappearing += 1
                 if first_reappearing is None:
-                    first_reappearing = (lines[k - (1 - offset)], user)
+                    first_reappearing = (int(lines[k - (1 - offset)]), user)
             seen.add(user)
 
         prev = full[-1]
@@ -69,15 +69,10 @@ def check(path, chunksize=1_000_000):
     }
 
 
-def main():
-    parser = argparse.ArgumentParser(description=__doc__,
-                                     formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--small", action="store_true", help="check ratings_small.csv")
-    args = parser.parse_args()
-    path = DATA_DIR / ("ratings_small.csv" if args.small else "ratings.csv")
-
-    print(f"Checking {path}")
-    r = check(path)
+def run(data_dir, small=False):
+    name = "ratings_small.csv" if small else "ratings.csv"
+    section(f"Extra: is {name} sorted by userId?")
+    r = check(data_dir / name)
     print(f"Rows: {r['rows']:,}   Users: {r['users']:,}   Empty userId: {r['nulls']:,}   "
           f"({r['seconds']:.1f} s)")
 
@@ -94,7 +89,3 @@ def main():
         line, user = r["first_reappearing"]
         print(f"Each user's ratings are in one contiguous block: NO - {r['reappearing']:,} "
               f"users reappear later (first: user {user} at line {line:,})")
-
-
-if __name__ == "__main__":
-    main()
