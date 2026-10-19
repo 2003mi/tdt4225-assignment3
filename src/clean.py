@@ -30,8 +30,8 @@ from .load import (iter_ratings, load_credits, load_keywords, load_links, load_m
                    parse_literal, to_number)
 from .paths import DATA_DIR
 from .repair import repair_broken_rows
-from .schema import (CastMember, CrewMember, Genre, MovieDoc, RawCastEntry, RawCrewEntry,
-                     UserDoc)
+from .schema import (CastMember, CrewMember, Genre, Keyword, MovieDoc, RawCastEntry,
+                     RawCrewEntry, UserDoc)
 
 # --- Expected results on the full dataset (from the EDA) --------------------
 EXPECTED_MOVIES = 45_433            # 45,466 rows - 3 second halves - 30 duplicate rows
@@ -171,6 +171,7 @@ def parse_nested(df: pd.DataFrame) -> pd.DataFrame:
     - belongs_to_collection: parse_literal(v, dict) -> {"id", "name"} only,
       or None.
     """
+    
     raise NotImplementedError
 
 
@@ -242,12 +243,28 @@ def trim_crew(crew: list[RawCrewEntry]) -> list[CrewMember]:
 
 
 def clean_keywords(data_dir: Path = DATA_DIR) -> pd.DataFrame:
-    """TODO: keywords.csv -> DataFrame with columns id, keywords.
+    """keywords.csv -> DataFrame with columns id, keywords (one row per movie).
 
-    - id -> int, drop exact duplicates (987 rows)
-    - keywords: parse_literal(v, list) -> [{"id", "name"}]
+    - id -> int, drop exact duplicate rows (987). The assert afterwards checks
+      that no id is left with two *different* keyword lists.
+    - keywords: text -> list -> trim_keywords() ([{"id", "name"}]); missing -> []
     """
-    raise NotImplementedError
+    df = load_keywords(data_dir)
+    df["id"] = to_number(df["id"]).astype(int)
+    before = len(df)
+    df = df.drop_duplicates().reset_index(drop=True)
+    print(f"keywords: removed {before - len(df)} duplicate rows, {len(df):,} movies left")
+    assert df["id"].is_unique, "ids with different keyword lists remain"
+
+    # one lambda per row: text -> list (None -> []) -> trimmed list
+    df["keywords"] = df["keywords"].map(lambda v: trim_keywords(parse_literal(v, list) or []))
+    return df[["id", "keywords"]]
+
+
+def trim_keywords(keywords: list[dict[str, Any]]) -> list[Keyword]:
+    """Keep only id and name of each keyword (they have no other fields, but this
+    also documents the shape)."""
+    return [{"id": k["id"], "name": k["name"]} for k in keywords]
 
 
 def build_movies(meta: pd.DataFrame, credits: pd.DataFrame,
