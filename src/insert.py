@@ -15,7 +15,6 @@ users  - one document per user, _id = MovieLens userId, with an embedded
 MongoDB needs no schema up front: collections are created on the first insert.
 Both collections are dropped first, so the script can be rerun safely.
 
-Status: functions marked TODO are skeletons to fill in. The rest is done.
 """
 from collections import Counter
 from collections.abc import Iterable, Iterator
@@ -72,18 +71,86 @@ def insert_users(db: Database, user_docs: Iterable[UserDoc]) -> None:
 
 
 def verify(db: Database, stats: Counter[str], expected_movies: int,
-           expected_ratings: int | None = None) -> None:
-    """TODO: check the database against the expected numbers and print evidence for the report.
+           expected_ratings: int | None = None) -> bool:
+    """Check the database against the expected numbers and print evidence for the report.
 
-    - movies: count_documents({}) == expected_movies
-    - users: count_documents({}) == stats["users"]
-    - total ratings in the database == stats["ratings_kept"] (and ==
-      expected_ratings on the full file). Hint: aggregate
-      [{"$group": {"_id": None, "n": {"$sum": {"$size": "$ratings"}}}}]
-    - print stats (read / unmapped / kept)
-    - pprint one movie (e.g. Toy Story, _id 862) and the first rating of one user
-    - largest user document in bytes:
-      [{"$project": {"size": {"$bsonSize": "$$ROOT"}}}, {"$sort": {"size": -1}}, {"$limit": 1}]
-    - type check: one movie's release_date is a datetime, budget an int or None
+    Counts   - movies, users and the total number of embedded ratings match
+               what was built (and the EDA's numbers on the full file)
+    Size     - the largest user document is far below MongoDB's 16 MB limit
+    Types    - dates are real dates, numbers are numbers, no text "None"
+    Index    - the text index for Q7 exists
+    Samples  - one movie and one user, shortened with $slice
+
+    Prints [OK] / [FAIL] per check and returns True if everything passed.
+    The ratings check reads the whole users collection once (can take a minute).
     """
-    raise NotImplementedError
+    results: list[bool] = []
+
+    def check(name: str, ok: bool, detail: str) -> None:
+        results.append(ok)
+        print(f"  [{'OK' if ok else 'FAIL'}] {name}: {detail}")
+
+    # --- Counts and size
+    print("Counts")
+    n_movies = db.movies.count_documents({})
+    check("movies", n_movies == expected_movies, f"{n_movies:,} (expected {expected_movies:,})")
+    n_users = db.users.count_documents({})
+    check("users", n_users == stats["users"], f"{n_users:,} (built {stats['users']:,})")
+
+    totals = next(db.users.aggregate([
+        {"$project": {"n": {"$size": "$ratings"}, "bytes": {"$bsonSize": "$$ROOT"}}},
+        {"$group": {"_id": None, "ratings": {"$sum": "$n"},
+                    "max_ratings": {"$max": "$n"}, "max_bytes": {"$max": "$bytes"}}},
+    ]), {"ratings": 0, "max_ratings": 0, "max_bytes": 0})
+    check("ratings in users", totals["ratings"] == stats["ratings_kept"],
+          f"{totals['ratings']:,} (built {stats['ratings_kept']:,})")
+    if expected_ratings is not None:
+        check("ratings vs. EDA", totals["ratings"] == expected_ratings,
+              f"{totals['ratings']:,} (expected {expected_ratings:,})")
+    print(f"  ratings read {stats['ratings_read']:,}, unmapped (no valid link) "
+          f"{stats['ratings_unmapped']:,}, kept {stats['ratings_kept']:,}")
+    limit = 16 * 1024 * 1024
+    check("largest user document", totals["max_bytes"] < limit,
+          f"{totals['max_ratings']:,} ratings, {totals['max_bytes'] / 1024 / 1024:.2f} MB (limit 16 MB)")
+
+    # --- Types: every value has the type the queries expect
+    print("Types")
+    def not_of_type(field: str, *types: str) -> int:
+        """Movies where `field` is none of `types` and not null."""
+        return db.movies.count_documents(
+            {"$nor": [{field: {"$type": t}} for t in types] + [{field: None}]})
+
+    wrong = not_of_type("release_date", "date")
+    check("movies.release_date is a date or null", wrong == 0, f"{wrong:,} wrong")
+    for field in ("budget", "revenue", "runtime", "vote_count"):
+        wrong = not_of_type(field, "int", "long")
+        check(f"movies.{field} is an integer or null", wrong == 0, f"{wrong:,} wrong")
+    wrong = not_of_type("vote_average", "double")
+    check("movies.vote_average is a double or null", wrong == 0, f"{wrong:,} wrong")
+    wrong = db.movies.count_documents({"belongs_to_collection": {"$type": "string"}})
+    check("no collection stored as text", wrong == 0, f"{wrong:,} wrong")
+    wrong = next(db.users.aggregate([
+        {"$sample": {"size": 1000}},
+        {"$unwind": "$ratings"},
+        {"$match": {"ratings.timestamp": {"$not": {"$type": "date"}}}},
+        {"$count": "n"},
+    ]), {"n": 0})["n"]
+    check("users.ratings.timestamp is a date (1,000 random users)", wrong == 0, f"{wrong:,} wrong")
+
+    # --- Index
+    print("Index")
+    indexes = [ix["name"] for ix in db.movies.list_indexes()]
+    check("text index for Q7", "text_overview_tagline" in indexes, ", ".join(indexes))
+
+    # --- Samples for the report
+    short_lists = {"cast": {"$slice": 3}, "crew": {"$slice": 3}, "keywords": {"$slice": 3}}
+    movie = db.movies.find_one({"_id": 862}, short_lists) or db.movies.find_one({}, short_lists)
+    print("Sample movie (Toy Story, _id 862, if present; lists cut to 3 with $slice)")
+    pprint(movie, sort_dicts=False)
+    print("Sample user (lowest _id; first 2 ratings)")
+    pprint(db.users.find_one({}, {"ratings": {"$slice": 2}}, sort=[("_id", 1)]), sort_dicts=False)
+
+    passed = sum(results)
+    print(f"\nVerification: {passed}/{len(results)} checks passed"
+          + ("" if passed == len(results) else " - see [FAIL] above"))
+    return passed == len(results)
