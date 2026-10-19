@@ -295,13 +295,22 @@ def trim_keywords(keywords: list[dict[str, Any]]) -> list[Keyword]:
 
 def build_movies(meta: pd.DataFrame, credits: pd.DataFrame,
                  keywords: pd.DataFrame) -> pd.DataFrame:
-    """TODO: merge into one row per movie.
+    """Merge metadata, credits and keywords into one row per movie.
 
-    meta.merge(credits, on="id", how="left", validate="one_to_one")
-        .merge(keywords, on="id", how="left", validate="one_to_one")
-    Missing cast/crew/keywords (e.g. the 1 movie without credits) -> [].
+    how="left" keeps every movie, also those without credits/keywords.
+    validate="one_to_one" raises an error if either side has duplicate ids
+    (so a merge can never multiply movies). Missing lists -> [].
     """
-    raise NotImplementedError
+    df = (meta
+          .merge(credits, on="id", how="left", validate="one_to_one")
+          .merge(keywords, on="id", how="left", validate="one_to_one"))
+    assert len(df) == len(meta), "merge changed the number of movies"
+
+    for col in ("cast", "crew", "keywords"):
+        missing = int(df[col].map(lambda v: not isinstance(v, list)).sum())
+        df[col] = df[col].map(lambda v: v if isinstance(v, list) else [])
+        print(f"{col}: {missing:,} movies had no row -> []")
+    return df
 
 
 def to_movie_documents(movies: pd.DataFrame) -> list[MovieDoc]:
