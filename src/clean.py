@@ -70,12 +70,18 @@ def clean_metadata(data_dir: Path = DATA_DIR) -> pd.DataFrame:
 
 
 def drop_duplicate_ids(df: pd.DataFrame) -> pd.DataFrame:
-    """TODO: id -> int, keep one row per id (the one with the highest vote_count).
-
-    Hint: sort by the numeric vote_count descending, then drop_duplicates("id").
-    Expected: 30 rows removed, 45,433 left.
-    """
-    raise NotImplementedError
+    df = df.copy()
+    df["id"] = to_number(df["id"]).astype(int)
+    before = len(df)
+    df = (df.assign(_votes=to_number(df["vote_count"]))
+            .sort_values("_votes", ascending=False, kind="stable", na_position="last")
+            .drop_duplicates("id", keep="first")
+            .drop(columns="_votes")
+            .sort_index()
+            .reset_index(drop=True))
+    print(f"duplicate ids: removed {before - len(df)} rows, {len(df):,} movies left")
+    assert df["id"].is_unique, "duplicate ids remain"
+    return df
 
 
 def convert_types(df: pd.DataFrame) -> pd.DataFrame:
