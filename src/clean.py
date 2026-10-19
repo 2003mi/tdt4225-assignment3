@@ -30,8 +30,8 @@ from .load import (iter_ratings, load_credits, load_keywords, load_links, load_m
                    parse_literal, to_number)
 from .paths import DATA_DIR
 from .repair import repair_broken_rows
-from .schema import (CastMember, CrewMember, Genre, Keyword, MovieDoc, RawCastEntry,
-                     RawCrewEntry, UserDoc)
+from .schema import (CastMember, Collection, CrewMember, Genre, Keyword, MovieDoc,
+                     RawCastEntry, RawCrewEntry, UserDoc)
 
 # --- Expected results on the full dataset (from the EDA) --------------------
 EXPECTED_MOVIES = 45_433            # 45,466 rows - 3 second halves - 30 duplicate rows
@@ -49,6 +49,12 @@ TEXT_COLUMNS = ["imdb_id", "title", "original_title", "original_language", "over
                 "tagline", "status"]
 DROP_COLUMNS = ["homepage", "poster_path"]
 CAST_FIELDS = ["id", "name", "gender"]            # + order and characters, see group_cast
+LIST_FIELDS: dict[str, tuple[str, ...]] = {        # nested list columns -> fields to keep
+    "genres": ("id", "name"),
+    "production_companies": ("id", "name"),
+    "production_countries": ("iso_3166_1", "name"),
+    "spoken_languages": ("iso_639_1", "name"),
+}
 CREW_FIELDS = ["id", "name", "job", "department"]
 
 
@@ -163,16 +169,36 @@ def apply_null_rules(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def parse_nested(df: pd.DataFrame) -> pd.DataFrame:
-    """TODO: Python-literal strings -> lists/dicts.
+    """Python-literal strings -> lists/dicts, trimmed to the fields we keep.
 
-    - genres, production_companies, production_countries, spoken_languages:
-      parse_literal(v, list); missing -> [] . Keep the order of genres
-      ([0] is the primary genre in Q5).
-    - belongs_to_collection: parse_literal(v, dict) -> {"id", "name"} only,
-      or None.
+    - LIST_FIELDS columns (genres, companies, countries, languages):
+      parse_literal(v, list), keep only the listed fields; missing -> [].
+      The order of genres is kept ([0] is the primary genre in Q5).
+    - belongs_to_collection: {"id", "name"}, or None (-> null in MongoDB).
     """
-    
-    raise NotImplementedError
+    df = df.copy()
+    for col, fields in LIST_FIELDS.items():
+        df[col] = df[col].map(lambda v: keep_fields(parse_literal(v, list) or [], fields))
+    df["belongs_to_collection"] = df["belongs_to_collection"].map(parse_collection)
+
+    empty = ", ".join(f"{col} {int((df[col].map(len) == 0).sum()):,}" for col in LIST_FIELDS)
+    in_coll = int(df["belongs_to_collection"].notna().sum())
+    print(f"nested parsed; empty lists: {empty}; in a collection: {in_coll:,}")
+    return df
+
+
+def keep_fields(items: list[dict[str, Any]], fields: tuple[str, ...]) -> list[dict[str, Any]]:
+    """Copy each dict in `items`, keeping only `fields` (in that order)."""
+    return [{f: item[f] for f in fields} for item in items]
+
+
+def parse_collection(value: Any) -> Collection | None:
+    """"{'id': 10194, 'name': 'Toy Story Collection', 'poster_path': ...}" -> {"id", "name"}.
+    Missing or unparseable -> None (stored as null, not as the text "None")."""
+    collection = parse_literal(value, dict)
+    if collection is None:
+        return None
+    return {"id": collection["id"], "name": collection["name"]}
 
 
 def clean_credits(data_dir: Path = DATA_DIR) -> pd.DataFrame:
