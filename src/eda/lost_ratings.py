@@ -19,29 +19,9 @@ that are a second MovieLens entry for the same film (e.g. Pokemon 3, tmdb
 """
 import pandas as pd
 
+from ..links import REASONS, classify_links
 from ..load import to_number
 from .common import section, show
-
-REASONS = ["ok", "no tmdbId", "tmdbId not in metadata", "imdb mismatch"]
-
-
-def classify_links(raw_links: pd.DataFrame, meta: pd.DataFrame) -> pd.DataFrame:
-    """Return links.csv with integer ids, imdb_num and a 'reason' column."""
-    links = raw_links.copy()
-    links["movieId"] = to_number(links["movieId"]).astype(int)
-    links["tmdbId"] = to_number(links["tmdbId"]).astype("Int64")
-    links["imdb_num"] = to_number(links["imdbId"])
-
-    m = meta.drop_duplicates("id")
-    imdb_of = pd.Series(to_number(m["imdb_id"].str.removeprefix("tt")).values, index=m["id"])
-    expected = links["tmdbId"].map(imdb_of)
-
-    links["reason"] = "ok"
-    links.loc[links["tmdbId"].isna(), "reason"] = "no tmdbId"
-    links.loc[links["tmdbId"].notna() & ~links["tmdbId"].isin(m["id"]), "reason"] = "tmdbId not in metadata"
-    links.loc[expected.notna() & (expected != links["imdb_num"]), "reason"] = "imdb mismatch"
-    return links
-
 
 def run(raw_links: pd.DataFrame, meta: pd.DataFrame, movie_counts: pd.Series) -> None:
     """movie_counts: ratings per movieId, from core.eda_ratings."""

@@ -26,6 +26,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from .links import REASONS, classify_links
 from .load import (iter_ratings, load_credits, load_keywords, load_links, load_metadata,
                    parse_literal, to_number)
 from .paths import DATA_DIR
@@ -338,17 +339,24 @@ def clean_movies(data_dir: Path = DATA_DIR) -> list[MovieDoc]:
 # =============================================================================
 
 def build_link_map(movie_docs: list[MovieDoc], data_dir: Path = DATA_DIR) -> dict[int, int]:
-    """TODO: links.csv -> {movieId: tmdbId}.
+    """links.csv -> {movieId: tmdbId}, using only links classified as "ok".
 
-    Keep a link only if tmdbId is present, tmdbId is one of the movies, and
-    the link's imdbId equals that movie's imdb_id (where the movie has one).
-    These are the same rules as in src/eda/lost_ratings.py, so its
-    classify_links() can be reused: it needs a DataFrame with columns "id"
-    and "imdb_id", e.g. pd.DataFrame({"id": [d["_id"] for d in movie_docs],
-    "imdb_id": [d["imdb_id"] for d in movie_docs]}), then keep reason == "ok".
-    Expected: 45,368 links, every tmdbId used once (assert it).
+    A link is kept if it has a tmdbId, that tmdbId is one of the cleaned
+    movies, and its imdbId agrees with the movie's imdb_id (same rules as the
+    EDA, see src/links.py). Expected: 45,368 links, every tmdbId used once.
     """
-    raise NotImplementedError
+    movies = pd.DataFrame({"id": [d["_id"] for d in movie_docs],
+                           "imdb_id": [d["imdb_id"] for d in movie_docs]})
+    links = classify_links(load_links(data_dir), movies)
+
+    reasons = links["reason"].value_counts()
+    print("links: " + ", ".join(f"{r} {int(reasons.get(r, 0)):,}" for r in REASONS))
+
+    ok = links[links["reason"] == "ok"]
+    assert ok["tmdbId"].is_unique, "a TMDB movie is linked from several MovieLens movies"
+    link_map = dict(zip(ok["movieId"].astype(int), ok["tmdbId"].astype(int)))
+    print(f"link map: {len(link_map):,} movieId -> tmdbId (expected {EXPECTED_LINKS:,})")
+    return link_map
 
 
 def build_genre_lookup(movie_docs: list[MovieDoc]) -> dict[int, list[Genre]]:
