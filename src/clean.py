@@ -15,7 +15,8 @@ users:   links (cleaned)  -> {movieId: tmdbId}
          movies           -> {tmdbId: genres}
          ratings (stream) -> one document per user
 
-Status: functions marked TODO are skeletons to fill in. The rest is done.
+All functions are implemented; each prints its counts so a run can be
+checked against the EDA.
 """
 import math
 from collections import Counter
@@ -32,7 +33,7 @@ from .load import (iter_ratings, load_credits, load_keywords, load_links, load_m
 from .paths import DATA_DIR
 from .repair import repair_broken_rows
 from .schema import (CastMember, Collection, CrewMember, Genre, Keyword, MovieDoc,
-                     RawCastEntry, RawCrewEntry, UserDoc)
+                     Rating, RawCastEntry, RawCrewEntry, UserDoc)
 
 # --- Expected results on the full dataset (from the EDA) --------------------
 EXPECTED_MOVIES = 45_433            # 45,466 rows - 3 second halves - 30 duplicate rows
@@ -366,26 +367,84 @@ def build_genre_lookup(movie_docs: list[MovieDoc]) -> dict[int, list[Genre]]:
 
 def iter_user_documents(link_map: dict[int, int], genre_lookup: dict[int, list[Genre]],
                         data_dir: Path = DATA_DIR, small: bool = False,
-                        stats: Counter[str] | None = None) -> Iterator[UserDoc]:
-    """TODO: stream ratings.csv and yield one document per user.
+                        stats: Counter[str] | None = None,
+                        chunksize: int = 1_000_000) -> Iterator[UserDoc]:
+    """Stream ratings.csv and yield one document per user.
 
     Document: {"_id": userId,
                "ratings": [{"movie_id": tmdbId, "rating": 4.5,
-                            "timestamp": datetime (UTC), "genres": [{"id", "name"}]}, ...]}
+                            "timestamp": datetime, "genres": [{"id", "name"}]}, ...]}
 
-    The file is sorted and grouped by userId (EDA step 6), so:
-      for each chunk from iter_ratings(data_dir, small):
-        - map movieId -> tmdbId with link_map; count and drop unmapped ratings
-        - timestamp (Unix seconds) -> datetime: pd.to_datetime(..., unit="s", utc=True)
-        - all users in the chunk except the last are complete -> yield them
-        - the last user may continue in the next chunk -> carry their rows over
-      after the last chunk, yield the carried user.
-    Skip users with no mapped ratings.
+    timestamp is a datetime without timezone, in UTC - pymongo stores such
+    datetimes as UTC. (Calling .timestamp() on it in Python would wrongly
+    treat it as local time; use calendar.timegm(dt.timetuple()) instead.)
 
-    Count into `stats` (a Counter): ratings_read, ratings_unmapped,
-    ratings_kept, users. Expected ratings_kept on the full file: 25,969,853.
+    The file is sorted and grouped by userId (EDA step 6), so per chunk:
+      1. translate movieId -> tmdbId with link_map; drop (and count) ratings
+         that do not map
+      2. every user in the chunk except the last one is complete -> yield them
+      3. the last user may continue in the next chunk -> carry their rows over
+    After the last chunk the carried user is yielded. Users with no mapped
+    ratings get no document.
+
+    Counts go into `stats`: ratings_read, ratings_unmapped, ratings_kept, users.
+    Expected ratings_kept on the full file: 25,969,853.
     """
-    raise NotImplementedError
+    if stats is None:
+        stats = Counter()
+    carry: pd.DataFrame | None = None   # rows of a user that may continue in the next chunk
+
+    for chunk in iter_ratings(data_dir, small, chunksize=chunksize):
+        stats["ratings_read"] += len(chunk)
+
+        # 1. movieId -> tmdbId; ids not in link_map become NaN and are dropped
+        tmdb = chunk["movieId"].map(link_map)
+        mapped = tmdb.notna()
+        stats["ratings_unmapped"] += int((~mapped).sum())
+        chunk = chunk.loc[mapped].assign(movie_id=tmdb[mapped].astype("int64"))
+
+        if carry is not None:
+            chunk = pd.concat([carry, chunk], ignore_index=True)
+        if chunk.empty:
+            continue
+
+        # 2./3. everyone but the last user is complete
+        is_last_user = chunk["userId"] == chunk["userId"].iloc[-1]
+        carry = chunk.loc[is_last_user]
+        yield from _user_documents(chunk.loc[~is_last_user], genre_lookup, stats)
+
+    if carry is not None and not carry.empty:
+        yield from _user_documents(carry, genre_lookup, stats)
+
+
+def _user_documents(rows: pd.DataFrame, genre_lookup: dict[int, list[Genre]],
+                    stats: Counter[str]) -> Iterator[UserDoc]:
+    """Turn ratings rows (sorted and grouped by userId) into user documents.
+
+    Columns are converted to plain Python lists once per chunk (fast), then
+    sliced per user. The boundaries between users are the places where
+    userId changes, found with numpy instead of a slow groupby.
+    """
+    if rows.empty:
+        return
+    users = rows["userId"].to_numpy()
+    movie_ids: list[int] = rows["movie_id"].tolist()
+    ratings: list[float] = rows["rating"].astype(float).tolist()   # float32 -> exact Python float
+    times = pd.to_datetime(rows["timestamp"], unit="s").dt.to_pydatetime().tolist()
+
+    # index where each user's block starts / ends
+    starts = [0, *(np.flatnonzero(np.diff(users)) + 1).tolist()]
+    ends = [*starts[1:], len(rows)]
+
+    for start, end in zip(starts, ends):
+        user_ratings: list[Rating] = [
+            {"movie_id": movie_ids[i], "rating": ratings[i], "timestamp": times[i],
+             "genres": genre_lookup[movie_ids[i]]}
+            for i in range(start, end)
+        ]
+        stats["ratings_kept"] += end - start
+        stats["users"] += 1
+        yield {"_id": int(users[start]), "ratings": user_ratings}
 
 
 # =============================================================================
