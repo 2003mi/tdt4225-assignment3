@@ -45,6 +45,8 @@ TAGLINE_PLACEHOLDERS = {"-"}
 INT_COLUMNS = ["budget", "revenue", "runtime", "vote_count"]
 FLOAT_COLUMNS = ["vote_average", "popularity"]
 BOOL_COLUMNS = ["adult", "video"]
+TEXT_COLUMNS = ["imdb_id", "title", "original_title", "original_language", "overview",
+                "tagline", "status"]
 DROP_COLUMNS = ["homepage", "poster_path"]
 CAST_FIELDS = ["id", "name", "gender"]            # + order and characters, see group_cast
 CREW_FIELDS = ["id", "name", "job", "department"]
@@ -70,6 +72,13 @@ def clean_metadata(data_dir: Path = DATA_DIR) -> pd.DataFrame:
 
 
 def drop_duplicate_ids(df: pd.DataFrame) -> pd.DataFrame:
+    """id -> int, keep one row per id (the one with the highest vote_count).
+
+    vote_count is still text here, so it is converted for sorting - sorting
+    the text would put "9" above "150". kind="stable" keeps ties (most
+    duplicates have equal vote_count) in file order, so reruns give the same
+    result. Expected: 30 rows removed, 45,433 left.
+    """
     df = df.copy()
     df["id"] = to_number(df["id"]).astype(int)
     before = len(df)
@@ -85,29 +94,72 @@ def drop_duplicate_ids(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def convert_types(df: pd.DataFrame) -> pd.DataFrame:
-    """TODO: text -> real types.
+    """Text -> real types. Only changes types; deciding what counts as
+    "unknown" is apply_null_rules' job.
 
-    - INT_COLUMNS -> "Int64" (pandas integer that allows missing values)
-    - FLOAT_COLUMNS -> float
-    - BOOL_COLUMNS: "True"/"False" -> bool
-    - release_date -> datetime (pd.to_datetime, format="%Y-%m-%d", errors="coerce")
-    - text columns: strip whitespace, empty string -> missing
+    - INT_COLUMNS -> "Int64" (capital I: the pandas integer that allows
+      missing values; plain int would crash on the first NaN)
+    - FLOAT_COLUMNS -> float (vote_average has decimals, e.g. 6.5)
+    - BOOL_COLUMNS: "True"/"False" -> nullable boolean (missing stays missing)
+    - release_date -> datetime; unparseable or missing -> NaT
+    - text columns: strip whitespace; empty or whitespace-only -> missing
+    The nested columns (genres, ...) stay text until parse_nested.
     """
-    raise NotImplementedError
+    df = df.copy()
+
+    for col in INT_COLUMNS:
+        # .round() first: "104.0" is a whole number, but astype("Int64")
+        # refuses anything with decimals instead of silently cutting them off
+        df[col] = to_number(df[col]).round().astype("Int64")
+    for col in FLOAT_COLUMNS:
+        df[col] = to_number(df[col]).astype(float)
+    for col in BOOL_COLUMNS:
+        df[col] = df[col].map({"True": True, "False": False}).astype("boolean")
+
+    df["release_date"] = pd.to_datetime(df["release_date"], errors="coerce", format="%Y-%m-%d")
+
+    blanked = 0
+    for col in TEXT_COLUMNS:
+        stripped = df[col].str.strip()
+        is_blank = stripped == ""
+        blanked += int(is_blank.sum())
+        df[col] = stripped.mask(is_blank)
+    print(f"types converted; {blanked} blank text values -> missing")
+    return df
 
 
 def apply_null_rules(df: pd.DataFrame) -> pd.DataFrame:
-    """TODO: values that mean "unknown" -> missing.
+    """Values that mean "unknown" -> missing. Prints how many values each rule
+    changed (numbers for the report).
 
     - budget, revenue: < MONEY_MIN -> missing, each column on its own
       (catches 0 as well). Before de-duplication that was 36,573 + 244 budgets
-      and 38,055 + 154 revenues, so expect roughly 36,800 / 38,200 nulls.
+      and 38,055 + 154 revenues, so expect roughly 36,800 / 38,200.
     - runtime == 0 -> missing
     - vote_average -> missing where vote_count == 0
     - overview in OVERVIEW_PLACEHOLDERS, tagline in TAGLINE_PLACEHOLDERS -> missing
     original_language "xx" is kept on purpose (handled in Q9).
     """
-    raise NotImplementedError
+    df = df.copy()
+    changed: dict[str, int] = {}
+
+    def to_missing(col: str, condition: pd.Series, rule: str) -> None:
+        """Set df[col] to missing where condition is True, and count the changes."""
+        condition = condition.fillna(False).astype(bool)   # a missing comparison = no change
+        changed[rule] = int((condition & df[col].notna()).sum())
+        df[col] = df[col].mask(condition)
+
+    for col in ("budget", "revenue"):
+        to_missing(col, df[col] < MONEY_MIN, f"{col} < {MONEY_MIN:,} (incl. 0)")
+    to_missing("runtime", df["runtime"] == 0, "runtime == 0")
+    to_missing("vote_average", df["vote_count"] == 0, "vote_average where vote_count == 0")
+    to_missing("overview", df["overview"].isin(OVERVIEW_PLACEHOLDERS), "overview placeholder")
+    to_missing("tagline", df["tagline"].isin(TAGLINE_PLACEHOLDERS), "tagline placeholder")
+
+    print("null rules:")
+    for rule, n in changed.items():
+        print(f"  {rule:<38} {n:>7,} values -> missing")
+    return df
 
 
 def parse_nested(df: pd.DataFrame) -> pd.DataFrame:
@@ -123,33 +175,70 @@ def parse_nested(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def clean_credits(data_dir: Path = DATA_DIR) -> pd.DataFrame:
-    """TODO: credits.csv -> DataFrame with columns id, cast, crew (one row per movie).
+    """credits.csv -> DataFrame with columns id, cast, crew (one row per movie).
 
     - id -> int, drop_duplicates("id") (44 rows; the 7 differing copies only
-      differ in crew order)
-    - cast: parse_literal(v, list) -> group_cast()
-    - crew: parse_literal(v, list) -> trim_crew()
+      differ in crew order, so keeping the first is fine)
+    - cast: text -> list -> group_cast() (one entry per person)
+    - crew: text -> list -> trim_crew()
+    Missing or unparseable lists become [].
     """
-    raise NotImplementedError
+    df = load_credits(data_dir)
+    df["id"] = to_number(df["id"]).astype(int)
+    before = len(df)
+    df = df.drop_duplicates("id", keep="first").reset_index(drop=True)
+    print(f"credits: removed {before - len(df)} duplicate rows, {len(df):,} movies left")
+    assert df["id"].is_unique, "duplicate ids remain"
+
+    # .map calls the function once per row: each call gets ONE movie's value
+    raw_cast = df["cast"].map(lambda v: parse_literal(v, list) or [])
+    df["cast"] = raw_cast.map(group_cast)
+    df["crew"] = df["crew"].map(lambda v: parse_literal(v, list) or []).map(trim_crew)
+
+    merged = raw_cast.map(len) - df["cast"].map(len)   # entries removed per movie
+    print(f"cast: merged {int(merged.sum()):,} repeated entries in {int((merged > 0).sum()):,} movies")
+    return df[["id", "cast", "crew"]]
 
 
 def group_cast(cast: list[RawCastEntry]) -> list[CastMember]:
-    """TODO: one entry per person, sorted by billing order.
+    """One entry per person, sorted by billing order.
 
     Input:  [{"id": 3, "name": .., "gender": 2, "order": 0, "character": "A", ...}, ...]
     Output: [{"id": 3, "name": .., "gender": 2, "order": 0, "characters": ["A", "B"]}, ...]
 
     - group by person id; order = the person's lowest order; characters in
-      the order they appear, without duplicates
-    - sort by (order, position in the original list) - 87 movies have ties
+      the order they appear, without duplicates or empty names
+    - sort by (order, position of the person's first entry) - 87 movies have ties
     Expected: 1,207 entries merged in 951 movies.
     """
-    raise NotImplementedError
+    people: dict[int, CastMember] = {}   # person id -> that person's grouped entry
+    first_seen: dict[int, int] = {}      # person id -> position of their first entry (tie-breaker)
+
+    for position, entry in enumerate(cast):
+        person_id = entry["id"]
+        if person_id not in people:                 # first time we see this person
+            people[person_id] = {
+                "id": person_id,
+                "name": entry["name"],
+                "gender": entry["gender"],
+                "order": entry["order"],
+                "characters": [],
+            }
+            first_seen[person_id] = position
+
+        person = people[person_id]
+        person["order"] = min(person["order"], entry["order"])   # keep the best billing
+        character = entry["character"]
+        if character and character not in person["characters"]:
+            person["characters"].append(character)
+
+    return sorted(people.values(), key=lambda p: (p["order"], first_seen[p["id"]]))
 
 
 def trim_crew(crew: list[RawCrewEntry]) -> list[CrewMember]:
-    """TODO: keep only CREW_FIELDS for each crew entry. (No duplicates to remove.)"""
-    raise NotImplementedError
+    """Keep only CREW_FIELDS (id, name, job, department) for each crew entry."""
+    return [{"id": c["id"], "name": c["name"], "job": c["job"], "department": c["department"]}
+            for c in crew]
 
 
 def clean_keywords(data_dir: Path = DATA_DIR) -> pd.DataFrame:
