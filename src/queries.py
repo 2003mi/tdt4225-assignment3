@@ -190,7 +190,34 @@ def q3(db: Database) -> list[Row]:
 
     Columns: actor, movies, distinct_genres, example_genres.
     """
-    raise NotImplementedError
+    return aggregate(db.movies, [
+        # one document per (movie, actor)
+        {"$unwind": "$cast"},
+        # one document per actor: movie count + one genre-name list per movie
+        {"$group": {
+            "_id": "$cast.id",
+            "actor": {"$first": "$cast.name"},
+            "movies": {"$sum": 1},
+            "genres": {"$addToSet": "$genres.name"},
+        }},
+        # >= 10 credited movies (before the $reduce, so it runs for fewer actors)
+        {"$match": {"movies": {"$gte": 10}}},
+        # flatten the lists of genre names into one list of distinct genres
+        {"$addFields": {"genres": {"$reduce": {
+            "input": "$genres",
+            "initialValue": [],
+            "in": {"$setUnion": ["$$value", "$$this"]},
+        }}}},
+        {"$addFields": {"distinct_genres": {"$size": "$genres"}}},
+        # below is used to find how many acctors that had 20 geners, not used in the final query
+        # {"$match": {"distinct_genres": 20}},
+        # {"$count": "actors_with_all_genres"},
+        # widest breadth first; ties: more movies first, then actor id
+        {"$sort": {"distinct_genres": -1, "movies": -1, "_id": 1}},
+        {"$limit": 10},
+        {"$project": {"_id": 0, "actor": 1, "movies": 1, "distinct_genres": 1,
+                      "example_genres": {"$slice": ["$genres", 5]}}},
+    ])
 
 
 def q4(db: Database) -> list[Row]:
@@ -202,8 +229,37 @@ def q4(db: Database) -> list[Row]:
     Columns: collection, movies, total_revenue, median_vote_average,
     first_release, last_release.
     """
-    raise NotImplementedError
+    return aggregate(db.movies, [
+        # $match on belongs_to_collection.name.
+        {"$match": {"belongs_to_collection.name": {"$ne": None}}},
 
+        {"$group": {
+            "_id": "$belongs_to_collection.id",
+            "collection": {"$first": "$belongs_to_collection.name"},
+            "movies": {"$sum": 1},
+            "genres": {"$addToSet": "$genres.name"},
+            "total_revenue": {"$sum": "$revenue"},
+            "median_vote_average": {"$median": {"input": "$vote_average", "method": "approximate"}},
+            "first_release": {"$min": "$release_date"},
+            "last_release": {"$max": "$release_date"},
+        }},
+
+        {"$match": {"movies": {"$gte": 3}}},
+        {"$sort": {"total_revenue": -1, "movies": -1, "_id": 1}},
+        {"$limit": 10},
+        {"$project": {"_id": 0, "collection": 1, "movies": 1, "total_revenue": 1,
+                      "median_vote_average": 1, "release_span": {"$concat": [
+                    {"$dateToString": {"date": "$first_release", "format": "%Y-%m-%d"}},
+                    " -> ",
+                    {"$dateToString": {"date": "$last_release", "format": "%Y-%m-%d"}},
+                    ]},}},
+    ])
+
+
+# Q2, Q3, Q8: $unwind + $group, here on cast instead of crew.
+# Q3: $addToSet collects distinct values.
+# Q4: a $match on belongs_to_collection.name.
+# Q5, Q6: $year on release_date, then subtract the remainder to get the decade.
 
 def q5(db: Database) -> list[Row]:
     """By decade (1970s, 1980s, ...) and primary genre (first element in

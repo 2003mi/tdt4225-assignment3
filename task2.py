@@ -33,6 +33,10 @@ def format_value(value: Any) -> Any:
         return ", ".join(str(v) for v in value)
     if isinstance(value, float):
         return round(value, 2)
+    if isinstance(value, int) and not isinstance(value, bool):
+        # pymongo returns large integers as bson.Int64, which tabulate would
+        # print as a float ("7,707,367,425.00"); a plain int prints as "7,707,367,425"
+        return int(value)
     return value
 
 
