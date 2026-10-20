@@ -32,17 +32,89 @@ from typing import Any
 
 from pymongo.collection import Collection
 from pymongo.database import Database
+from pymongoexplain import ExplainableCollection
 
 Row = dict[str, Any]
 
+# task2.py --explain sets this to True: every aggregate() call then also
+# prints how MongoDB executed the pipeline.
+EXPLAIN = False
 
-def aggregate(collection: Collection, pipeline: list[dict[str, Any]]) -> list[Row]:
+
+def aggregate(collection: Collection, pipeline: list[dict[str, Any]],
+              explain: bool = False) -> list[Row]:
     """Run an aggregation pipeline and return all result documents as a list.
 
     allowDiskUse lets MongoDB spill large intermediate results (e.g. all actor
     pairs) to disk instead of failing at its 100 MB in-memory limit.
+
+    explain=True (or EXPLAIN, set by task2.py --explain) first prints a short
+    summary of MongoDB's execution plan, then runs the query as usual, so the
+    function still returns the rows.
     """
+    if explain or EXPLAIN:
+        explain_pipeline(collection, pipeline)
     return list(collection.aggregate(pipeline, allowDiskUse=True))
+
+
+def explain_pipeline(collection: Collection, pipeline: list[dict[str, Any]],
+                     verbosity: str = "executionStats") -> dict[str, Any]:
+    """Ask MongoDB how it runs `pipeline`, print a summary and return the full plan.
+
+    ExplainableCollection(...).aggregate() sends an "explain" command and
+    returns its result as ONE dict (the plan), not a cursor of rows.
+    verbosity: "queryPlanner" only plans the query (fast); "executionStats"
+    also runs it and reports documents examined and time (so the query runs
+    twice in total with --explain).
+    Options must be given in camelCase (allowDiskUse): pymongoexplain silently
+    drops snake_case ones such as allow_disk_use.
+    """
+    plan: dict[str, Any] = ExplainableCollection(collection, verbosity=verbosity).aggregate(
+        pipeline, allowDiskUse=True)
+    print_plan_summary(plan, verbosity)
+    return plan
+
+
+def _find(obj: Any, key: str) -> list[Any]:
+    """All values stored under `key` anywhere inside nested dicts/lists, top-down."""
+    found: list[Any] = []
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            if k == key:
+                found.append(v)
+            found.extend(_find(v, key))
+    elif isinstance(obj, list):
+        for item in obj:
+            found.extend(_find(item, key))
+    return found
+
+
+def print_plan_summary(plan: dict[str, Any], verbosity: str) -> None:
+    """Print the parts of an explain result that matter for the report.
+
+    pipeline stages - the stages MongoDB runs after the query layer ("$cursor"
+                      is the query layer; stages pushed into it, e.g. a first
+                      $match, $group or $sort, no longer appear on their own)
+    plan            - the winning plan, outermost stage first. COLLSCAN = every
+                      document read; IXSCAN / TEXT_MATCH = an index was used
+    executionStats  - documents/keys examined, rows returned and time
+    """
+    print(f"  explain ({verbosity}):")
+    stages = [next(iter(stage)) for stage in plan.get("stages", []) if stage]
+    if stages:
+        print(f"    pipeline stages: {' -> '.join(stages)}")
+    winning = _find(plan, "winningPlan")
+    plan_stages = _find(winning[0], "stage") if winning else []
+    indexes = sorted(set(_find(winning, "indexName")))
+    if plan_stages:
+        used = f"  (index: {', '.join(indexes)})" if indexes else "  (no index)"
+        print(f"    plan: {' <- '.join(plan_stages)}{used}")
+    stats = next((s for s in _find(plan, "executionStats") if isinstance(s, dict)), None)
+    if stats:
+        print(f"    docs examined {stats.get('totalDocsExamined', 0):,}, "
+              f"keys examined {stats.get('totalKeysExamined', 0):,}, "
+              f"returned {stats.get('nReturned', 0):,}, "
+              f"time {stats.get('executionTimeMillis', 0):,} ms")
 
 
 # =============================================================================
@@ -59,7 +131,23 @@ def q1(db: Database) -> list[Row]:
     is known. A movie with several directors counts for each of them.
     Columns: director, movies, median_revenue, mean_vote_average.
     """
-    raise NotImplementedError
+    return aggregate(db.movies, [
+        {"$match": {"crew.job": "Director"}},   #Finds movies that has atleast one director
+        {"$unwind": "$crew"},                   #Unwind, toy story becomes 100 documents, one for each crew
+        {"$match": {"crew.job": "Director"}},   #Finaly mach for director, now we will have one document for each director
+        {"$group": {                            #We now group it based on director id, and accumliate and calculate all needed values
+            "_id": "$crew.id",
+            "director": {"$first": "$crew.name"},
+            "movies": {"$sum": 1},
+            "median_revenue": {"$median": {"input": "$revenue", "method": "approximate"}},
+            "mean_vote_average": {"$avg": "$vote_average"},
+        }},
+        {"$match": {"movies": {"$gte": 5}}},            #Only look at directors that has more than 5 movies
+        {"$sort": {"median_revenue": -1, "_id": 1}},    #Sort on median revenue falling
+        {"$limit": 10},                                 #Limit to 10
+        {"$project": {"_id": 0, "director": 1, "movies": 1,
+                      "median_revenue": 1, "mean_vote_average": 1}}, # what is returned, turns of _id
+    ])
 
 
 def q2(db: Database) -> list[Row]:
@@ -73,7 +161,26 @@ def q2(db: Database) -> list[Row]:
     it all, task2.py prints the first rows and the total.
     Columns: actor_1, actor_2, movies, mean_vote_average.
     """
-    raise NotImplementedError
+
+    cast_ids_names = {"$map": {"input": "$cast", "as": "c",
+                               "in": {"id": "$$c.id", "name": "$$c.name"}}}
+    # since we made one actor only have one entry for each movie it becomes easier to not pair actors with themself                       
+    return aggregate(db.movies, [
+        {"$project": {"vote_average": 1, "a": cast_ids_names, "b": cast_ids_names}},
+        {"$unwind": "$a"},
+        {"$unwind": "$b"}, 
+        {"$match": {"$expr": {"$lt": ["$a.id", "$b.id"]}}},
+        {"$group": {
+            "_id": {"a": "$a.id", "b": "$b.id"},
+            "actor_1": {"$first": "$a.name"},
+            "actor_2": {"$first": "$b.name"},
+            "movies": {"$sum": 1},
+            "avg_vote_average": {"$avg": "$vote_average"},
+        }},
+        {"$match": {"movies": {"$gte": 3}}},
+        {"$sort": {"movies": -1, "avg_vote_average": -1, "_id": 1}}, 
+        {"$project": {"_id": 0, "actor_1": 1, "actor_2": 1, "movies": 1, "avg_vote_average": 1}},     
+    ])
 
 
 def q3(db: Database) -> list[Row]:

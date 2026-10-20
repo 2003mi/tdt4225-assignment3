@@ -5,6 +5,7 @@
     python task2.py 10           # Q10 (both parts: 10a and 10b)
     python task2.py 2 --rows 50  # print more rows of a long result
     python task2.py 7 --pprint   # also pprint the raw documents from MongoDB
+    python task2.py 7 --explain  # also print how MongoDB ran it (index used, docs read, time)
 
 Each question is a function in src/queries.py. Results are printed as a table
 (screenshot these for the report); --pprint additionally shows the raw rows
@@ -18,6 +19,7 @@ from typing import Any
 
 from tabulate import tabulate
 
+from src import queries
 from src.DbConnector import DbConnector
 from src.queries import QUERIES, Row
 
@@ -63,8 +65,11 @@ def main() -> None:
     parser.add_argument("questions", nargs="*", help="question numbers, e.g. 1 7 10 (default: all)")
     parser.add_argument("--rows", type=int, default=25, help="max rows to print per result (default 25)")
     parser.add_argument("--pprint", action="store_true", help="also pprint the raw result rows")
+    parser.add_argument("--explain", action="store_true",
+                        help="print MongoDB's execution plan for every aggregation (runs each query twice)")
     args = parser.parse_args()
     keys = selected_keys(args.questions)
+    queries.EXPLAIN = args.explain
 
     connection = DbConnector()
     try:
