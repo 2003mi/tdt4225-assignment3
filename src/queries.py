@@ -346,29 +346,15 @@ def q7(db: Database) -> list[Row]:
     must be the first stage.
     Columns: title, year, vote_average, vote_count.
     """
+    # print(db.movies.count_documents({"$text": {"$search": "noir"}}))                 # all noir matches, any vote count
+    # print(db.movies.count_documents({"$text": {"$search": "\"neo-noir\""}}))          # exact phrase neo-noir, any vote count
+    # return list(db.movies.find({"$text": {"$search": "\"neo-noir\""}}, {"title": 1, "vote_count": 1}))
     return aggregate(db.movies, [
-        {"$match": {"release_date": {"$ne": None}}},
-        {"$addFields": {
-            "decade": {"$subtract": [{"$year": "$release_date"},
-                            {"$mod": [{"$year": "$release_date"}, 10]}]},
-            # genders of the top 5, unknown (0) removed
-            "genders": {"$filter": {"input": {"$slice": ["$cast.gender", 5]}, "as": "g",
-                                    "cond": {"$in": ["$$g", [1, 2]]}}},
-        }},
-        # a movie with no known gender in its top 5 has no proportion -> drop it
-        {"$match": {"genders.0": {"$exists": True}}},
-        {"$addFields": {"female_proportion": {"$divide": [
-            {"$size": {"$filter": {"input": "$genders", "as": "g", "cond": {"$eq": ["$$g", 1]}}}},
-            {"$size": "$genders"},
-        ]}}},
-
-        {"$group": {
-            "_id": "$decade",
-            "avg_female_proportion": {"$avg": "$female_proportion"},
-            "movies": {"$sum": 1},
-        }},
-        {"$sort": {"avg_female_proportion": -1, "_id": 1}},
-
+        {"$match": {"$text": {"$search": "noir"}, "vote_count": {"$gte": 50}}},
+        {"$sort": {"vote_average": -1, "vote_count": -1, "_id": 1}},
+        {"$limit": 20},
+        {"$project": {"_id": 0, "title": 1, "year": {"$year": "$release_date"},
+                      "vote_average": 1, "vote_count": 1, "overview": 1, "tagline": 1}},
     ])
 
 
