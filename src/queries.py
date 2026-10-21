@@ -23,10 +23,16 @@ Rules from Part 1 that the queries rely on:
   - the cast has one entry per person per movie, so a person is never counted
     twice in one movie
 
-Useful building blocks: $match, $project / $addFields, $unwind, $group,
-$sort, $limit, $lookup, $facet, $size, $slice, $arrayElemAt, $year,
-$filter, $setUnion / $addToSet, $median (MongoDB 7.0+), $stdDevPop.
-Pass allowDiskUse=True to aggregate() for heavy pipelines (Q2, Q8).
+Syntax reminders used in the comments below:
+  "$field"       the value of a field in the current document
+  "a.b"          field b inside subdocument a; on an array of subdocuments,
+                 "$a.b" gives the array of all the b values
+  "$$name"       a variable, e.g. the loop variable of $map / $filter / $reduce
+  _id in $group  the group key (like SQL GROUP BY); every other field in a
+                 $group must be an accumulator ($sum, $avg, $first, ...)
+
+aggregate() always passes allowDiskUse=True, so the heavy pipelines (Q2, Q8,
+Q10) may spill to disk instead of failing at MongoDB's 100 MB memory limit.
 """
 from typing import Any
 
@@ -132,21 +138,38 @@ def q1(db: Database) -> list[Row]:
     Columns: director, movies, median_revenue, mean_vote_average.
     """
     return aggregate(db.movies, [
-        {"$match": {"crew.job": "Director"}},   #Finds movies that has atleast one director
-        {"$unwind": "$crew"},                   #Unwind, toy story becomes 100 documents, one for each crew
-        {"$match": {"crew.job": "Director"}},   #Finaly mach for director, now we will have one document for each director
-        {"$group": {                            #We now group it based on director id, and accumliate and calculate all needed values
+        # Keep only movies with at least one director. On an array of
+        # subdocuments, "crew.job": "Director" means "ANY crew entry has job
+        # Director": whole movies are kept or dropped, the crew array itself is
+        # not filtered yet. (Optimisation only: skips movies without a director
+        # before the expensive $unwind.)
+        {"$match": {"crew.job": "Director"}},
+        # One document per crew member: Toy Story becomes ~100 documents that
+        # are identical except that "crew" is now ONE object instead of a list.
+        # Each copy keeps the movie's revenue and vote_average.
+        {"$unwind": "$crew"},
+        # Same filter again, but now "crew" is a single person, so this keeps
+        # exactly the director rows: one document per (movie, director) pair.
+        {"$match": {"crew.job": "Director"}},
+        # One document per director, grouped by person id (names can repeat).
+        #   $sum: 1   counts the documents = movies directed (unknown revenue too)
+        #   $median / $avg skip null, so unknown revenues/scores drop out
+        {"$group": {
             "_id": "$crew.id",
             "director": {"$first": "$crew.name"},
             "movies": {"$sum": 1},
             "median_revenue": {"$median": {"input": "$revenue", "method": "approximate"}},
             "mean_vote_average": {"$avg": "$vote_average"},
         }},
-        {"$match": {"movies": {"$gte": 5}}},            #Only look at directors that has more than 5 movies
-        {"$sort": {"median_revenue": -1, "_id": 1}},    #Sort on median revenue falling
-        {"$limit": 10},                                 #Limit to 10
+        # $match after $group works like SQL HAVING: directors with >= 5 movies
+        {"$match": {"movies": {"$gte": 5}}},
+        # Highest median revenue first; the director id breaks ties so the
+        # order is the same on every run
+        {"$sort": {"median_revenue": -1, "_id": 1}},
+        {"$limit": 10},
+        # Output columns: hide the numeric _id (1 = keep, 0 = drop)
         {"$project": {"_id": 0, "director": 1, "movies": 1,
-                      "median_revenue": 1, "mean_vote_average": 1}}, # what is returned, turns of _id
+                      "median_revenue": 1, "mean_vote_average": 1}},
     ])
 
 
@@ -159,17 +182,30 @@ def q2(db: Database) -> list[Row]:
     the person with the smaller id first. Big casts give many pairs (n*(n-1)/2
     per movie), so this is the heaviest query. The result can be long: return
     it all, task2.py prints the first rows and the total.
-    Columns: actor_1, actor_2, movies, mean_vote_average.
+    Columns: actor_1, actor_2, movies, avg_vote_average.
     """
-
+    # The cast trimmed to {id, name} per actor. $map works like a Python list
+    # comprehension: [{"id": c["id"], "name": c["name"]} for c in cast].
+    # "$$c" (two $) is the loop variable, "$cast" (one $) is a field.
+    # Built once in Python and used twice below: a stage cannot refer to a
+    # field that the same stage creates, so "b": "$a" would not work.
     cast_ids_names = {"$map": {"input": "$cast", "as": "c",
                                "in": {"id": "$$c.id", "name": "$$c.name"}}}
-    # since we made one actor only have one entry for each movie it becomes easier to not pair actors with themself                       
     return aggregate(db.movies, [
+        # Two copies of the (small) cast list. Keeping only id and name makes
+        # the tens of millions of pair documents below much smaller.
         {"$project": {"vote_average": 1, "a": cast_ids_names, "b": cast_ids_names}},
+        # Unwinding both copies gives every actor x actor combination inside a
+        # movie: a cast of 3 gives 3 x 3 = 9 documents
         {"$unwind": "$a"},
-        {"$unwind": "$b"}, 
+        {"$unwind": "$b"},
+        # Keep each pair once, with the smaller id first. This removes the
+        # actor-with-themselves pairs (5, 5) and the mirrored duplicates
+        # ((9, 5) when (5, 9) is kept). Comparing ids, not cast positions,
+        # makes the same two people the same pair in every movie.
+        # $expr is needed to compare two fields of the same document.
         {"$match": {"$expr": {"$lt": ["$a.id", "$b.id"]}}},
+        # One document per pair: the compound _id groups on both ids at once
         {"$group": {
             "_id": {"a": "$a.id", "b": "$b.id"},
             "actor_1": {"$first": "$a.name"},
@@ -177,9 +213,11 @@ def q2(db: Database) -> list[Row]:
             "movies": {"$sum": 1},
             "avg_vote_average": {"$avg": "$vote_average"},
         }},
+        # HAVING movies >= 3 (before the sort, so fewer pairs are sorted)
         {"$match": {"movies": {"$gte": 3}}},
-        {"$sort": {"movies": -1, "avg_vote_average": -1, "_id": 1}}, 
-        {"$project": {"_id": 0, "actor_1": 1, "actor_2": 1, "movies": 1, "avg_vote_average": 1}},     
+        # Most co-appearances first; ties: higher score first, then the ids
+        {"$sort": {"movies": -1, "avg_vote_average": -1, "_id": 1}},
+        {"$project": {"_id": 0, "actor_1": 1, "actor_2": 1, "movies": 1, "avg_vote_average": 1}},
     ])
 
 
@@ -191,9 +229,12 @@ def q3(db: Database) -> list[Row]:
     Columns: actor, movies, distinct_genres, example_genres.
     """
     return aggregate(db.movies, [
-        # one document per (movie, actor)
+        # One document per (movie, actor). Genres are NOT unwound: a movie with
+        # 3 genres would then become 3 documents and be counted 3 times.
         {"$unwind": "$cast"},
-        # one document per actor: movie count + one genre-name list per movie
+        # One document per actor: movie count + one genre-name list per movie.
+        # "$genres.name" is the array of names, e.g. ["Animation", "Comedy"],
+        # so $addToSet collects a list of LISTS (flattened below).
         {"$group": {
             "_id": "$cast.id",
             "actor": {"$first": "$cast.name"},
@@ -202,19 +243,25 @@ def q3(db: Database) -> list[Row]:
         }},
         # >= 10 credited movies (before the $reduce, so it runs for fewer actors)
         {"$match": {"movies": {"$gte": 10}}},
-        # flatten the lists of genre names into one list of distinct genres
+        # Flatten the lists into one list of distinct genres. $reduce is a loop
+        # with a running result: $$value = result so far (starts as []),
+        # $$this = the current movie's genre list, $setUnion merges the two
+        # and removes duplicates.
         {"$addFields": {"genres": {"$reduce": {
             "input": "$genres",
             "initialValue": [],
             "in": {"$setUnion": ["$$value", "$$this"]},
         }}}},
+        # Separate stage: a stage cannot use a field it creates itself
         {"$addFields": {"distinct_genres": {"$size": "$genres"}}},
-        # below is used to find how many acctors that had 20 geners, not used in the final query
+        # Check used for the report (how many actors cover all 20 genres);
+        # not part of the answer:
         # {"$match": {"distinct_genres": 20}},
         # {"$count": "actors_with_all_genres"},
-        # widest breadth first; ties: more movies first, then actor id
+        # Widest breadth first; ties: more movies first, then actor id
         {"$sort": {"distinct_genres": -1, "movies": -1, "_id": 1}},
         {"$limit": 10},
+        # $project can compute new fields too: $slice takes the first 5 genres
         {"$project": {"_id": 0, "actor": 1, "movies": 1, "distinct_genres": 1,
                       "example_genres": {"$slice": ["$genres", 5]}}},
     ])
@@ -226,34 +273,41 @@ def q4(db: Database) -> list[Row]:
     report movie count, total revenue, median vote_average, and the earliest
     -> latest release date.
 
-    Columns: collection, movies, total_revenue, median_vote_average,
-    first_release, last_release.
+    Columns: collection, movies, total_revenue, median_vote_average, release_span.
     """
     return aggregate(db.movies, [
-        # $match on belongs_to_collection.name.
+        # Only movies in a collection. None is MongoDB's null ("null" in quotes
+        # would be the text "null"). $ne: None also drops documents where the
+        # field is missing: belongs_to_collection is null -> .name is missing.
         {"$match": {"belongs_to_collection.name": {"$ne": None}}},
-
+        # One document per collection (grouped by collection id).
+        #   $sum of revenue: null counts as 0, so the total covers known revenues
+        #   $min / $max of release_date: real BSON dates compare by time, and
+        #   null (unknown date) is skipped
         {"$group": {
             "_id": "$belongs_to_collection.id",
             "collection": {"$first": "$belongs_to_collection.name"},
             "movies": {"$sum": 1},
-            "genres": {"$addToSet": "$genres.name"},
             "total_revenue": {"$sum": "$revenue"},
             "median_vote_average": {"$median": {"input": "$vote_average", "method": "approximate"}},
             "first_release": {"$min": "$release_date"},
             "last_release": {"$max": "$release_date"},
         }},
-
+        # HAVING movies >= 3
         {"$match": {"movies": {"$gte": 3}}},
+        # Largest total first; ties: more movies, then collection id
         {"$sort": {"total_revenue": -1, "movies": -1, "_id": 1}},
         {"$limit": 10},
+        # "earliest -> latest" as one text column: $dateToString formats each
+        # date and $concat joins the pieces
         {"$project": {"_id": 0, "collection": 1, "movies": 1, "total_revenue": 1,
                       "median_vote_average": 1, "release_span": {"$concat": [
-                    {"$dateToString": {"date": "$first_release", "format": "%Y-%m-%d"}},
-                    " -> ",
-                    {"$dateToString": {"date": "$last_release", "format": "%Y-%m-%d"}},
-                    ]},}},
+                          {"$dateToString": {"date": "$first_release", "format": "%Y-%m-%d"}},
+                          " -> ",
+                          {"$dateToString": {"date": "$last_release", "format": "%Y-%m-%d"}},
+                      ]}}},
     ])
+
 
 def q5(db: Database) -> list[Row]:
     """By decade (1970s, 1980s, ...) and primary genre (first element in
@@ -265,18 +319,30 @@ def q5(db: Database) -> list[Row]:
     Columns: decade, primary_genre, median_runtime, movies.
     """
     return aggregate(db.movies, [
+        # Drop movies that cannot be placed. "genres.0" is the element at
+        # index 0, so $exists: True means "the array is not empty".
         {"$match": {"release_date": {"$ne": None}, "genres.0": {"$exists": True}}},
+        # Per-movie values ($addFields keeps all other fields):
+        #   decade        = year - year % 10, e.g. 1994 - 4 = 1990
+        #   primary_genre = first element of the genre-name array. Not $first:
+        #                   inside $group, $first means "first DOCUMENT"
         {"$addFields": {
             "decade": {"$subtract": [{"$year": "$release_date"},
                                      {"$mod": [{"$year": "$release_date"}, 10]}]},
             "primary_genre": {"$arrayElemAt": ["$genres.name", 0]},
         }},
+        # One document per (decade, primary genre): a compound group key
         {"$group": {
             "_id": {"decade": "$decade", "primary_genre": "$primary_genre"},
             "median_runtime": {"$median": {"input": "$runtime", "method": "approximate"}},
             "movies": {"$sum": 1},
         }},
+        # Oldest decade first, then longest median runtime; the key fields now
+        # only exist inside _id, hence "_id.decade"
         {"$sort": {"_id.decade": 1, "median_runtime": -1, "_id.primary_genre": 1}},
+        # Build the output document field by field ($replaceWith keeps this
+        # order; $project would put the computed fields last). The decade
+        # becomes a label like "1990s" - after the sort, which needs the number.
         {"$replaceWith": {
             "decade": {"$concat": [{"$toString": "$_id.decade"}, "s"]},
             "primary_genre": "$_id.primary_genre",
@@ -284,7 +350,6 @@ def q5(db: Database) -> list[Row]:
             "movies": "$movies",
         }},
     ])
-
 
 
 def q6(db: Database) -> list[Row]:
@@ -300,33 +365,42 @@ def q6(db: Database) -> list[Row]:
     """
     return aggregate(db.movies, [
         {"$match": {"release_date": {"$ne": None}}},
+        # Everything per movie, with array operators instead of $unwind, so
+        # there stays one document per movie and $sum: 1 counts movies.
+        #   "$cast.gender"  the genders in billing order, e.g. [1, 2, 2, 0, 2, 1]
+        #   $slice 5        the top 5 billed (not order < 5: order can have gaps)
+        #   $filter         keeps elements where cond is true, like
+        #                   [g for g in top5 if g in (1, 2)] -> unknown removed
         {"$addFields": {
             "decade": {"$subtract": [{"$year": "$release_date"},
-                            {"$mod": [{"$year": "$release_date"}, 10]}]},
-            # genders of the top 5, unknown (0) removed
+                                     {"$mod": [{"$year": "$release_date"}, 10]}]},
             "genders": {"$filter": {"input": {"$slice": ["$cast.gender", 5]}, "as": "g",
                                     "cond": {"$in": ["$$g", [1, 2]]}}},
         }},
-        # a movie with no known gender in its top 5 has no proportion -> drop it
+        # A movie with no known gender in its top 5 has no proportion -> drop
+        # it. This also guarantees the division below never divides by zero.
         {"$match": {"genders.0": {"$exists": True}}},
+        # Proportion per movie = number of women / number of known genders
         {"$addFields": {"female_proportion": {"$divide": [
             {"$size": {"$filter": {"input": "$genders", "as": "g", "cond": {"$eq": ["$$g", 1]}}}},
             {"$size": "$genders"},
         ]}}},
-
+        # One document per decade: the mean of the per-movie proportions (every
+        # movie weighs the same), and how many movies were used
         {"$group": {
             "_id": "$decade",
             "avg_female_proportion": {"$avg": "$female_proportion"},
             "movies": {"$sum": 1},
         }},
+        # Highest proportion first
         {"$sort": {"avg_female_proportion": -1, "_id": 1}},
+        # Output in this column order; here _id IS the decade (not compound)
         {"$replaceWith": {
             "decade": {"$concat": [{"$toString": "$_id"}, "s"]},
             "avg_female_proportion": "$avg_female_proportion",
             "movies": "$movies",
         }},
     ])
-    
 
 
 def q7(db: Database) -> list[Row]:
@@ -338,16 +412,26 @@ def q7(db: Database) -> list[Row]:
     "neo-noir" into "neo" and "noir", so searching "noir" finds both; a search
     string starting with "-" means "exclude". In an aggregation, a $text match
     must be the first stage.
+    Result: 60 movies match "noir" (5 of them the phrase "neo-noir"), but only 5
+    have >= 50 votes, so the answer has 5 rows; no neo-noir match reaches 50
+    votes (max 42, The Aura).
     Columns: title, year, vote_average, vote_count.
     """
-    # print(db.movies.count_documents({"$text": {"$search": "noir"}}))                 # all noir matches, any vote count
-    # print(db.movies.count_documents({"$text": {"$search": "\"neo-noir\""}}))          # exact phrase neo-noir, any vote count
+    # Checks used for the report:
+    # print(db.movies.count_documents({"$text": {"$search": "noir"}}))          # all noir matches: 60
+    # print(db.movies.count_documents({"$text": {"$search": "\"neo-noir\""}}))  # exact phrase neo-noir: 5
     # return list(db.movies.find({"$text": {"$search": "\"neo-noir\""}}, {"title": 1, "vote_count": 1}))
     return aggregate(db.movies, [
+        # $text uses the text index on overview + tagline (MongoDB picks it: a
+        # collection has only one text index). $search is a string of words,
+        # OR'ed, case-insensitive. Only "noir": "neo-noir" would be split into
+        # "neo" OR "noir" and also match e.g. Neo in The Matrix.
+        # $text must be in the first stage; vote_count goes in the same $match.
         {"$match": {"$text": {"$search": "noir"}, "vote_count": {"$gte": 50}}},
+        # Highest score first; ties: more votes (more reliable), then id
         {"$sort": {"vote_average": -1, "vote_count": -1, "_id": 1}},
         {"$limit": 20},
-        {"$project": {"_id": 0, "title": 1, "year": {"$year": "$release_date"},
+        {"$project": {"_id": 0, "title": 1, "year": {"$toString": {"$year": "$release_date"}},
                       "vote_average": 1, "vote_count": 1}},
     ])
 
@@ -362,16 +446,28 @@ def q8(db: Database) -> list[Row]:
     job = "Director"; actors: cast.
     Columns: director, actor, films, mean_vote_average, mean_revenue.
     """
+    # The cast trimmed to {id, name} per actor (see Q2)
     cast_ids_names = {"$map": {"input": "$cast", "as": "c",
                                "in": {"id": "$$c.id", "name": "$$c.name"}}}
-    # since we made one actor only have one entry for each movie it becomes easier to not pair actors with themself                       
     return aggregate(db.movies, [
-        {"$match": {"vote_count": {"$gte": 100}, "crew.job": "Director"}, },
-        {"$unwind": "$crew"},                   #Unwind, toy story becomes 100 documents, one for each crew
-        {"$match": {"crew.job": "Director"}},   #Finaly mach for director, now we will have one document for each director
-        {"$project": {"_id": 1, "vote_average": 1, "vote_count": 1, "revenue": 1, "actor": cast_ids_names, "crew": 1}},
+        # Movies with >= 100 votes and at least one director (two conditions
+        # in one $match = AND)
+        {"$match": {"vote_count": {"$gte": 100}, "crew.job": "Director"}},
+        # One document per (movie, director), the same three steps as Q1
+        {"$unwind": "$crew"},
+        {"$match": {"crew.job": "Director"}},
+        # Keep what the group needs; the cast becomes a small {id, name} list
+        {"$project": {"_id": 1, "vote_average": 1, "vote_count": 1, "revenue": 1,
+                      "actor": cast_ids_names, "crew": 1}},
+        # One document per (movie, director, actor)
         {"$unwind": "$actor"},
+        # A director who also acts in the movie is not paired with themselves.
+        # $expr compares two fields of the same document.
         {"$match": {"$expr": {"$ne": ["$actor.id", "$crew.id"]}}},
+        # One document per (director, actor) pair. The cast has one entry per
+        # person per movie, so each film counts once per pair.
+        # $avg skips null: mean_revenue is over the films with known revenue
+        # (null if none of them has one).
         {"$group": {
             "_id": {"director": "$crew.id", "actor": "$actor.id"},
             "director": {"$first": "$crew.name"},
@@ -380,10 +476,13 @@ def q8(db: Database) -> list[Row]:
             "mean_vote_average": {"$avg": "$vote_average"},
             "mean_revenue": {"$avg": "$revenue"},
         }},
+        # HAVING films >= 3
         {"$match": {"films": {"$gte": 3}}},
+        # Highest mean score first; ties: longer collaboration first, then ids
         {"$sort": {"mean_vote_average": -1, "films": -1, "_id": 1}},
         {"$limit": 20},
-        {"$project": {"_id": 0, "director": 1, "actor": 1, "films": 1, "mean_vote_average": 1, "mean_revenue": 1}},     
+        {"$project": {"_id": 0, "director": 1, "actor": 1, "films": 1,
+                      "mean_vote_average": 1, "mean_revenue": 1}},
     ])
 
 
@@ -399,15 +498,22 @@ def q9(db: Database) -> list[Row]:
     Columns: original_language, movies, example_title.
     """
     return aggregate(db.movies, [
+        # Not English ($nin = "not in": also drops a null/missing language) and
+        # ANY production country is US (dot path into an array of subdocuments)
         {"$match": {"original_language": {"$nin": ["en", None]},
                     "production_countries.iso_3166_1": "US"}},
+        # One document per language; $first picks the first matching movie as
+        # the example (title = English title, readable in the report)
         {"$group": {
             "_id": "$original_language",
             "movies": {"$sum": 1},
             "example_title": {"$first": "$title"},
         }},
+        # Most movies first; ties alphabetically by language code
         {"$sort": {"movies": -1, "_id": 1}},
         {"$limit": 10},
+        # Output columns in this order. $cond is if/else: [if, then, else],
+        # used to label TMDB's "xx" code
         {"$replaceWith": {
             "original_language": {"$cond": [{"$eq": ["$_id", "xx"]}, "xx (no language)", "$_id"]},
             "movies": "$movies",
@@ -415,10 +521,28 @@ def q9(db: Database) -> list[Row]:
         }},
     ])
 
+
 def user_stats() -> list[dict[str, Any]]:
-    """Stages shared by Q10a and Q10b: one small document per user with >= 20 ratings."""
+    """Stages shared by Q10a and Q10b: one small document per user with >= 20 ratings.
+
+    No $group is needed: the users collection already has one document per
+    user, so everything is computed inside each document.
+    """
     return [
+        # >= 20 ratings: "ratings.19" is the 20th element (index 19), so it
+        # exists only if the array has at least 20 elements. Cheaper than
+        # counting the whole array.
         {"$match": {"ratings.19": {"$exists": True}}},
+        # Replace each user with just the numbers. This drops the big ratings
+        # array right away, so only small documents move on (and only 10 of
+        # them reach Python). Inside the expressions, "$ratings" is still the
+        # INPUT document's array.
+        #   variance          $stdDevPop over the ratings, squared with $pow
+        #                     (population variance, not $stdDevSamp)
+        #   distinct_genres   "$ratings.genres.id" goes through two array levels
+        #                     and gives one id list per rating, e.g.
+        #                     [[16, 35], [12, 14], [35]]; $reduce + $setUnion
+        #                     flattens it to distinct ids (as in Q3)
         {"$replaceWith": {
             "user": {"$toString": "$_id"},          # string: prints "45811", not "45,811"
             "ratings": {"$size": "$ratings"},
@@ -435,6 +559,7 @@ def user_stats() -> list[dict[str, Any]]:
 # Filled by the first Q10 call, reused by the second, so users is only read once.
 _q10_results: dict[str, list[Row]] = {}
 
+
 def q10_both(db: Database) -> dict[str, list[Row]]:
     """Compute both Q10 top-10 lists in ONE pass over users.
 
@@ -446,16 +571,22 @@ def q10_both(db: Database) -> dict[str, list[Row]]:
     if not _q10_results:
         result = aggregate(db.users, user_stats() + [
             {"$facet": {
+                # Most distinct genres first; ties (many users have all 20):
+                # more ratings first. $sort directly followed by $limit only
+                # keeps the current top 10 in memory.
                 "genre_diverse": [
                     {"$sort": {"distinct_genres": -1, "ratings": -1, "user": 1}},
                     {"$limit": 10},
                 ],
+                # Highest variance first. Maximum possible on a 0.5-5.0 scale:
+                # half 0.5 and half 5.0 -> 2.25^2 = 5.0625
                 "high_variance": [
                     {"$sort": {"variance": -1, "user": 1}},
                     {"$limit": 10},
                 ],
             }},
         ])
+        # $facet returns ONE document holding both lists
         _q10_results.update(result[0])
     return _q10_results
 
