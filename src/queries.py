@@ -354,7 +354,7 @@ def q7(db: Database) -> list[Row]:
         {"$sort": {"vote_average": -1, "vote_count": -1, "_id": 1}},
         {"$limit": 20},
         {"$project": {"_id": 0, "title": 1, "year": {"$year": "$release_date"},
-                      "vote_average": 1, "vote_count": 1, "overview": 1, "tagline": 1}},
+                      "vote_average": 1, "vote_count": 1}},
     ])
 
 
@@ -368,7 +368,29 @@ def q8(db: Database) -> list[Row]:
     job = "Director"; actors: cast.
     Columns: director, actor, films, mean_vote_average, mean_revenue.
     """
-    raise NotImplementedError
+    cast_ids_names = {"$map": {"input": "$cast", "as": "c",
+                               "in": {"id": "$$c.id", "name": "$$c.name"}}}
+    # since we made one actor only have one entry for each movie it becomes easier to not pair actors with themself                       
+    return aggregate(db.movies, [
+        {"$match": {"vote_count": {"$gte": 100}, "crew.job": "Director"}},
+        {"$unwind": "$crew"},                   #Unwind, toy story becomes 100 documents, one for each crew
+        {"$match": {"crew.job": "Director"}},   #Finaly mach for director, now we will have one document for each director
+        {"$project": {"_id": 1, "vote_average": 1, "vote_count": 1, "revenue": 1, "actor": cast_ids_names, "crew": 1}},
+        {"$unwind": "$actor"},
+        {"$match": {"$expr": {"$ne": ["$actor.id", "$crew.id"]}}},
+        {"$group": {
+            "_id": {"director": "$crew.id", "actor": "$actor.id"},
+            "director": {"$first": "$crew.name"},
+            "actor": {"$first": "$actor.name"},
+            "films": {"$sum": 1},
+            "mean_vote_average": {"$avg": "$vote_average"},
+            "mean_revenue": {"$avg": "$revenue"},
+        }},
+        {"$match": {"films": {"$gte": 3}}},
+        {"$sort": {"mean_vote_average": -1, "films": -1, "_id": 1}},
+        {"$limit": 20},
+        {"$project": {"_id": 0, "director": 1, "actor": 1, "films": 1, "mean_vote_average": 1, "mean_revenue": 1}},     
+    ])
 
 
 def q9(db: Database) -> list[Row]:
