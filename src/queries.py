@@ -415,28 +415,59 @@ def q9(db: Database) -> list[Row]:
         }},
     ])
 
+def user_stats() -> list[dict[str, Any]]:
+    """Stages shared by Q10a and Q10b: one small document per user with >= 20 ratings."""
+    return [
+        {"$match": {"ratings.19": {"$exists": True}}},
+        {"$replaceWith": {
+            "user": {"$toString": "$_id"},          # string: prints "45811", not "45,811"
+            "ratings": {"$size": "$ratings"},
+            "variance": {"$pow": [{"$stdDevPop": "$ratings.rating"}, 2]},
+            "distinct_genres": {"$size": {"$reduce": {
+                "input": "$ratings.genres.id",
+                "initialValue": [],
+                "in": {"$setUnion": ["$$value", "$$this"]},
+            }}},
+        }},
+    ]
+
+
+# Filled by the first Q10 call, reused by the second, so users is only read once.
+_q10_results: dict[str, list[Row]] = {}
+
+def q10_both(db: Database) -> dict[str, list[Row]]:
+    """Compute both Q10 top-10 lists in ONE pass over users.
+
+    $facet runs several sub-pipelines on the same input documents: user_stats()
+    reads the 26M ratings once, then each facet only sorts the small per-user
+    documents. The result is a single document {"genre_diverse": [...],
+    "high_variance": [...]}, stored in _q10_results so the second call is free.
+    """
+    if not _q10_results:
+        result = aggregate(db.users, user_stats() + [
+            {"$facet": {
+                "genre_diverse": [
+                    {"$sort": {"distinct_genres": -1, "ratings": -1, "user": 1}},
+                    {"$limit": 10},
+                ],
+                "high_variance": [
+                    {"$sort": {"variance": -1, "user": 1}},
+                    {"$limit": 10},
+                ],
+            }},
+        ])
+        _q10_results.update(result[0])
+    return _q10_results
+
 
 def q10_genre_diverse(db: Database) -> list[Row]:
-    """Q10 (part 1): for each user - ratings count, population variance of
-    ratings, number of distinct genres rated. Top 10 most genre-diverse users
-    (only users with >= 20 ratings).
-
-    Notes: users collection; distinct genres by genre id. Population variance
-    = $stdDevPop squared (not $stdDevSamp).
-    Columns: user, ratings, variance, distinct_genres.
-    """
-    return aggregate(db.users, [
-        {"$project": {"count": { "$size":"$ratings" }}},
-    ])
+    """Q10 (part 1): top 10 most genre-diverse users (>= 20 ratings)."""
+    return q10_both(db)["genre_diverse"]
 
 
 def q10_high_variance(db: Database) -> list[Row]:
-    """Q10 (part 2): the same per-user numbers, top 10 highest-variance users
-    (only users with >= 20 ratings).
-
-    Columns: user, ratings, variance, distinct_genres.
-    """
-    raise NotImplementedError
+    """Q10 (part 2): top 10 highest-variance users (>= 20 ratings)."""
+    return q10_both(db)["high_variance"]
 
 
 # Order and titles used by task2.py
