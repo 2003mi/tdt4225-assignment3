@@ -270,7 +270,27 @@ def q5(db: Database) -> list[Row]:
     drop out; runtime null is ignored by $median. Decade = year - year % 10.
     Columns: decade, primary_genre, median_runtime, movies.
     """
-    raise NotImplementedError
+    return aggregate(db.movies, [
+        {"$match": {"release_date": {"$ne": None}, "genres.0": {"$exists": True}}},
+        {"$addFields": {
+            "decade": {"$subtract": [{"$year": "$release_date"},
+                                     {"$mod": [{"$year": "$release_date"}, 10]}]},
+            "primary_genre": {"$arrayElemAt": ["$genres.name", 0]},
+        }},
+        {"$group": {
+            "_id": {"decade": "$decade", "primary_genre": "$primary_genre"},
+            "median_runtime": {"$median": {"input": "$runtime", "method": "approximate"}},
+            "movies": {"$sum": 1},
+        }},
+        {"$sort": {"_id.decade": 1, "median_runtime": -1, "_id.primary_genre": 1}},
+        {"$replaceWith": {
+            "decade": {"$concat": [{"$toString": "$_id.decade"}, "s"]},
+            "primary_genre": "$_id.primary_genre",
+            "median_runtime": "$median_runtime",
+            "movies": "$movies",
+        }},
+    ])
+
 
 
 def q6(db: Database) -> list[Row]:
