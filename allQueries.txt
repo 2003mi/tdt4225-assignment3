@@ -1,0 +1,235 @@
+You are connected to the database: movie
+-----------------------------------------------
+
+
+========================================================================
+Q1: Top 10 directors (>= 5 movies) by median revenue
+========================================================================
+director            movies    median_revenue    mean_vote_average
+----------------  --------  ----------------  -------------------
+Joss Whedon              5  1,405,403,694.00                 7.40
+Kyle Balda               5  1,020,063,384.00                 6.62
+David Yates             10    933,959,197.00                 6.70
+Peter Jackson           14    871,368,364.00                 7.12
+George Lucas             7    649,398,328.00                 6.81
+Brad Bird                6    623,722,818.00                 7.15
+Francis Lawrence         6    585,349,010.00                 6.80
+Chris Renaud             5    543,513,985.00                 6.70
+Eric Darnell             5    532,680,671.00                 6.34
+Tom McGrath              5    532,680,671.00                 6.40
+(0.7 s)
+
+========================================================================
+Q2: Actor pairs with >= 3 movies together
+========================================================================
+actor_1           actor_2            movies    avg_vote_average
+----------------  ---------------  --------  ------------------
+Huntz Hall        Leo Gorcey             35                6.35
+Charlie Chaplin   Edna Purviance         33                6.46
+Oliver Hardy      Stan Laurel            31                6.35
+Lou Costello      Bud Abbott             27                6.47
+Jeff Bennett      Rob Paulsen            27                6.23
+Grey Griffin      Frank Welker           25                6.71
+Raymond Burr      Barbara Hale           25                5.93
+John Wayne        Paul Fix               24                5.85
+Jim Cummings      Frank Welker           21                6.55
+Frank Mayo        Jack Mower             21                6.28
+Jim Cummings      Jeff Bennett           21                6.27
+Frank Welker      Jeff Bennett           21                6.23
+Peter Cushing     Christopher Lee        21                5.99
+Bernard Gorcey    Leo Gorcey             20                7.00
+Charlie Chaplin   Henry Bergman          20                6.98
+Toshirō Mifune    Takashi Shimura        19                7.48
+Bernard Gorcey    Huntz Hall             19                7.11
+Buster Keaton     Joe Roberts            19                6.88
+Sammo Hung        Yuen Biao              19                6.83
+Jackie Chan       Yuen Biao              19                6.80
+Charlie Chaplin   John Rand              19                6.75
+Simon Yam         Lam Suet               19                6.10
+William R. Moses  Barbara Hale           19                6.05
+Charlie Chaplin   Albert Austin          18                6.74
+Kenneth Williams  Charles Hawtrey        18                6.39
+... 45,625 more rows (45,650 in total)
+(90.8 s)
+
+========================================================================
+Q3: Top 10 actors (>= 10 movies) by genre breadth
+========================================================================
+actor                 movies    distinct_genres  example_genres
+------------------  --------  -----------------  -------------------------------------------
+Christopher Lee          148                 20  Action, Adventure, Animation, Comedy, Crime
+Donald Sutherland        108                 20  Action, Adventure, Animation, Comedy, Crime
+Christopher Walken        96                 20  Action, Adventure, Animation, Comedy, Crime
+Dennis Hopper             94                 20  Action, Adventure, Animation, Comedy, Crime
+Keith David               87                 20  Action, Adventure, Animation, Comedy, Crime
+Liam Neeson               82                 20  Action, Adventure, Animation, Comedy, Crime
+James Earl Jones          79                 20  Action, Adventure, Animation, Comedy, Crime
+Jim Broadbent             78                 20  Action, Adventure, Animation, Comedy, Crime
+Martin Sheen              77                 20  Action, Adventure, Animation, Comedy, Crime
+Ned Beatty                72                 20  Action, Adventure, Animation, Comedy, Crime
+(2.5 s)
+
+========================================================================
+Q4: Top 10 collections (>= 3 movies) by total revenue
+========================================================================
+collection                             movies    total_revenue    median_vote_average  release_span
+-----------------------------------  --------  ---------------  ---------------------  ------------------------
+Harry Potter Collection                     8    7,707,367,425                   7.50  2001-11-16 -> 2011-07-07
+Star Wars Collection                        8    7,434,494,790                   7.40  1977-05-25 -> 2016-12-14
+James Bond Collection                      26    7,106,970,239                   6.30  1962-10-04 -> 2015-10-26
+The Fast and the Furious Collection         8    5,125,098,793                   6.60  2001-06-22 -> 2017-04-12
+Pirates of the Caribbean Collection         5    4,521,576,826                   6.90  2003-07-09 -> 2017-05-23
+Transformers Collection                     5    4,366,101,244                   6.10  2007-06-27 -> 2017-06-21
+Despicable Me Collection                    6    3,691,070,216                   6.80  2010-07-08 -> 2017-06-15
+The Twilight Collection                     5    3,342,107,290                   5.80  2008-11-20 -> 2012-11-13
+Ice Age Collection                          5    3,216,708,553                   6.50  2002-03-10 -> 2016-06-23
+Jurassic Park Collection                    4    3,031,484,143                   6.20  1993-06-11 -> 2015-06-09
+(0.1 s)
+
+========================================================================
+Q5: Median runtime and count by decade and primary genre
+========================================================================
+decade    primary_genre      median_runtime    movies
+--------  ---------------  ----------------  --------
+1870s     Documentary                  1.00         2
+1880s     Documentary                  1.00         4
+1890s     Action                       1.00         2
+1890s     Comedy                       1.00         9
+1890s     Documentary                  1.00        27
+1890s     Drama                        1.00         2
+1890s     Family                       1.00         1
+1890s     Fantasy                      1.00         8
+1890s     History                      1.00         1
+1890s     Horror                       1.00         3
+1900s     History                     60.00         1
+1900s     Adventure                   14.00         4
+1900s     Drama                       10.00         7
+1900s     Thriller                     8.00         1
+1900s     Action                       6.00         2
+1900s     Fantasy                      4.00        15
+1900s     Comedy                       3.00        17
+1900s     Music                        3.00         1
+1900s     Science Fiction              3.00         2
+1900s     Animation                    2.00         1
+1900s     Horror                       2.00         2
+1900s     Crime                        1.00         2
+1900s     Documentary                  1.00        12
+1900s     Romance                      1.00         2
+1910s     History                    106.00         2
+... 207 more rows (232 in total)
+(0.2 s)
+
+========================================================================
+Q6: Female share of the top-5 billed cast, by decade
+========================================================================
+decade      avg_female_proportion    movies
+--------  -----------------------  --------
+1870s                        1.00         1
+2020s                        0.80         1
+1890s                        0.50         2
+1900s                        0.44        12
+2010s                        0.38    10,544
+1930s                        0.37     1,250
+2000s                        0.36     9,647
+1940s                        0.36     1,435
+1990s                        0.34     5,181
+1910s                        0.34       144
+1950s                        0.34     1,998
+1920s                        0.33       374
+1960s                        0.33     2,395
+1980s                        0.32     3,556
+1970s                        0.31     3,145
+(0.5 s)
+
+========================================================================
+Q7: Top 20 'noir' / 'neo-noir' movies (vote_count >= 50)
+========================================================================
+title                      vote_average    vote_count  year
+-----------------------  --------------  ------------  ------
+The Bad Sleep Well                 7.70            57  1960
+Drunken Angel                      7.70            54  1948
+Elevator to the Gallows            7.60            85  1958
+Synchronicity                      5.70           114  2015
+Frank & Lola                       5.70            51  2016
+(0.0 s)
+
+========================================================================
+Q8: Top 20 director-actor pairs (>= 3 films, vote_count >= 100)
+========================================================================
+director              actor               films    mean_vote_average    mean_revenue
+--------------------  ----------------  -------  -------------------  --------------
+Akira Kurosawa        Eijirô Tôno             3                 8.13      271,841.00
+Akira Kurosawa        Minoru Itô              3                 8.13      271,841.00
+Akira Kurosawa        Haruo Suzuki            3                 8.13      271,841.00
+Charlie Chaplin       Hank Mann               3                 8.13    6,506,393.67
+Quentin Tarantino     Harvey Keitel           3                 8.10  182,573,606.33
+Francis Ford Coppola  John Cazale             3                 8.10   99,009,750.67
+Akira Kurosawa        Atsushi Watanabe        3                 8.10      163,540.50
+Akira Kurosawa        Toranosuke Ogawa        3                 8.10      163,540.50
+Francis Ford Coppola  Robert Duvall           4                 8.07   96,622,408.25
+Akira Kurosawa        Noriko Honma            4                 8.07      141,216.33
+Akira Kurosawa        Daisuke Katô            4                 8.07      141,216.33
+Akira Kurosawa        Ichirô Chiba            4                 8.07      163,540.50
+Akira Kurosawa        Susumu Fujita           3                 8.07
+Akira Kurosawa        Shôichi Hirose          3                 8.07      271,841.00
+Akira Kurosawa        Haruya Sakamoto         3                 8.07      271,841.00
+Akira Kurosawa        Isao Kimura             4                 8.05      163,540.50
+Akira Kurosawa        Minoru Chiaki           6                 8.03      141,216.33
+Peter Jackson         Sean Bean               3                 8.03  972,181,581.00
+Peter Jackson         Viggo Mortensen         3                 8.03  972,181,581.00
+Peter Jackson         John Rhys-Davies        3                 8.03  972,181,581.00
+(1.4 s)
+
+========================================================================
+Q9: Top 10 non-English original languages with a US production country
+========================================================================
+original_language      movies  example_title
+-------------------  --------  -------------------
+fr                        112  Wings of Courage
+es                         72  Bitter Sugar
+it                         56  Frankie Starlight
+de                         51  Cold Fever
+ja                         31  Godzilla 1985
+pt                         15  Senseless
+xx (no language)           14  Quest for Fire
+nl                         12  Come On, Rangers
+ru                         11  Dark Eyes
+zh                         11  Eat Drink Man Woman
+(0.1 s)
+
+========================================================================
+Q10a: Top 10 most genre-diverse users (>= 20 ratings)
+========================================================================
+user      ratings    variance    distinct_genres
+------  ---------  ----------  -----------------
+45811      18,197        0.64                 20
+8659        9,225        0.31                 20
+270123      7,615        1.12                 20
+179792      7,490        0.90                 20
+228291      7,369        0.28                 20
+243443      6,283        1.60                 20
+98415       6,068        0.85                 20
+229879      5,997        1.02                 20
+98787       5,799        2.07                 20
+172224      5,679        0.53                 20
+(96.7 s)
+
+========================================================================
+Q10b: Top 10 highest-variance users (>= 20 ratings)
+========================================================================
+user      ratings    variance    distinct_genres
+------  ---------  ----------  -----------------
+153882         20        5.06                 15
+167241         34        5.06                 14
+185889         26        5.06                 14
+18703          20        5.06                 13
+57842          20        5.06                 14
+83102          20        5.06                 15
+15395          83        5.06                 14
+71009          27        5.06                 13
+179759         21        5.05                 13
+221535        120        5.04                 19
+(0.0 s)
+
+-----------------------------------------------
+Connection to movie-db is closed
