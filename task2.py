@@ -47,7 +47,11 @@ def print_rows(rows: list[Row], max_rows: int) -> None:
         return
     columns = list(rows[0].keys())
     table = [[format_value(row.get(col)) for col in columns] for row in rows[:max_rows]]
-    print(tabulate(table, headers=columns, tablefmt="simple", floatfmt=",.2f", intfmt=","))
+    # Text columns are printed as-is: tabulate would otherwise read text like
+    # "45811" or "1960" as a number and crash applying intfmt="," to it.
+    text_columns = [i for i in range(len(columns)) if any(isinstance(r[i], str) for r in table)]
+    print(tabulate(table, headers=columns, tablefmt="simple", floatfmt=",.2f", intfmt=",",
+                   disable_numparse=text_columns))
     if len(rows) > max_rows:
         print(f"... {len(rows) - max_rows:,} more rows ({len(rows):,} in total)")
 
