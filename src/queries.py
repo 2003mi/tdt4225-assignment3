@@ -255,12 +255,6 @@ def q4(db: Database) -> list[Row]:
                     ]},}},
     ])
 
-
-# Q2, Q3, Q8: $unwind + $group, here on cast instead of crew.
-# Q3: $addToSet collects distinct values.
-# Q4: a $match on belongs_to_collection.name.
-# Q5, Q6: $year on release_date, then subtract the remainder to get the decade.
-
 def q5(db: Database) -> list[Row]:
     """By decade (1970s, 1980s, ...) and primary genre (first element in
     genres), what is the median runtime and movie count? Sort by decade, then
@@ -372,7 +366,7 @@ def q8(db: Database) -> list[Row]:
                                "in": {"id": "$$c.id", "name": "$$c.name"}}}
     # since we made one actor only have one entry for each movie it becomes easier to not pair actors with themself                       
     return aggregate(db.movies, [
-        {"$match": {"vote_count": {"$gte": 100}, "crew.job": "Director"}},
+        {"$match": {"vote_count": {"$gte": 100}, "crew.job": "Director"}, },
         {"$unwind": "$crew"},                   #Unwind, toy story becomes 100 documents, one for each crew
         {"$match": {"crew.job": "Director"}},   #Finaly mach for director, now we will have one document for each director
         {"$project": {"_id": 1, "vote_average": 1, "vote_count": 1, "revenue": 1, "actor": cast_ids_names, "crew": 1}},
@@ -404,7 +398,22 @@ def q9(db: Database) -> list[Row]:
     no language) is kept and shown as "xx (no language)".
     Columns: original_language, movies, example_title.
     """
-    raise NotImplementedError
+    return aggregate(db.movies, [
+        {"$match": {"original_language": {"$nin": ["en", None]},
+                    "production_countries.iso_3166_1": "US"}},
+        {"$group": {
+            "_id": "$original_language",
+            "movies": {"$sum": 1},
+            "example_title": {"$first": "$title"},
+        }},
+        {"$sort": {"movies": -1, "_id": 1}},
+        {"$limit": 10},
+        {"$replaceWith": {
+            "original_language": {"$cond": [{"$eq": ["$_id", "xx"]}, "xx (no language)", "$_id"]},
+            "movies": "$movies",
+            "example_title": "$example_title",
+        }},
+    ])
 
 
 def q10_genre_diverse(db: Database) -> list[Row]:
@@ -416,7 +425,9 @@ def q10_genre_diverse(db: Database) -> list[Row]:
     = $stdDevPop squared (not $stdDevSamp).
     Columns: user, ratings, variance, distinct_genres.
     """
-    raise NotImplementedError
+    return aggregate(db.users, [
+        {"$project": {"count": { "$size":"$ratings" }}},
+    ])
 
 
 def q10_high_variance(db: Database) -> list[Row]:
