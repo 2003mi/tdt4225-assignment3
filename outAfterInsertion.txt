@@ -1,0 +1,143 @@
+(.venv) [sam@newHorizonsTrashEdition ASSIGMENT2]$ python3 task1.py --skip-eda
+You are connected to the database: movie
+-----------------------------------------------
+
+
+=== Cleaning movies ===
+metadata: 45,466 rows, repaired 3 broken records, dropped 0
+duplicate ids: removed 30 rows, 45,433 movies left
+types converted; 6 blank text values -> missing
+null rules:
+  budget < 1,000 (incl. 0)                36,797 values -> missing
+  revenue < 1,000 (incl. 0)               38,189 values -> missing
+  runtime == 0                             1,558 values -> missing
+  vote_average where vote_count == 0       2,896 values -> missing
+  overview placeholder                       143 values -> missing
+  tagline placeholder                          4 values -> missing
+nested parsed; empty lists: genres 2,442, production_companies 11,868, production_countries 6,279, spoken_languages 3,827; in a collection: 4,488
+credits: removed 44 duplicate rows, 45,432 movies left
+cast: merged 1,207 repeated entries in 951 movies
+keywords: removed 987 duplicate rows, 45,432 movies left
+cast: 1 movies had no row -> []
+crew: 1 movies had no row -> []
+keywords: 1 movies had no row -> []
+movies: 45,433 documents (expected 45,433)
+
+=== Inserting movies ===
+Dropped collections: movies, users
+Inserted 45,433 movies
+Created text index on movies.overview + movies.tagline
+
+=== Cleaning + inserting users (streaming ratings) ===
+links: ok 45,368, no tmdbId 219, tmdbId not in metadata 161, imdb mismatch 95
+link map: 45,368 movieId -> tmdbId (expected 45,368)
+Inserted 270,881 users                    
+
+=== Verifying ===
+Counts
+  [OK] movies: 45,433 (expected 45,433)
+  [OK] users: 270,881 (built 270,881)
+  [OK] ratings in users: 25,969,853 (built 25,969,853)
+  [OK] ratings vs. EDA: 25,969,853 (expected 25,969,853)
+  ratings read 26,024,289, unmapped (no valid link) 54,436, kept 25,969,853
+  [OK] largest user document: 18,197 ratings, 2.46 MB (limit 16 MB)
+Types
+  [OK] movies.release_date is a date or null: 0 wrong
+  [OK] movies.budget is an integer or null: 0 wrong
+  [OK] movies.revenue is an integer or null: 0 wrong
+  [OK] movies.runtime is an integer or null: 0 wrong
+  [OK] movies.vote_count is an integer or null: 0 wrong
+  [OK] movies.vote_average is a double or null: 0 wrong
+  [OK] no collection stored as text: 0 wrong
+  [OK] users.ratings.timestamp is a date (1,000 random users): 0 wrong
+Index
+  [OK] text index for Q7: _id_, text_overview_tagline
+Sample movie (Toy Story, _id 862, if present; lists cut to 3 with $slice)
+{'_id': 862,
+ 'adult': False,
+ 'belongs_to_collection': {'id': 10194, 'name': 'Toy Story Collection'},
+ 'budget': 30000000,
+ 'genres': [{'id': 16, 'name': 'Animation'},
+            {'id': 35, 'name': 'Comedy'},
+            {'id': 10751, 'name': 'Family'}],
+ 'imdb_id': 'tt0114709',
+ 'original_language': 'en',
+ 'original_title': 'Toy Story',
+ 'overview': "Led by Woody, Andy's toys live happily in his room until Andy's "
+             'birthday brings Buzz Lightyear onto the scene. Afraid of losing '
+             "his place in Andy's heart, Woody plots against Buzz. But when "
+             'circumstances separate Buzz and Woody from their owner, the duo '
+             'eventually learns to put aside their differences.',
+ 'popularity': 21.946943,
+ 'production_companies': [{'id': 3, 'name': 'Pixar Animation Studios'}],
+ 'production_countries': [{'iso_3166_1': 'US',
+                           'name': 'United States of America'}],
+ 'release_date': datetime.datetime(1995, 10, 30, 0, 0),
+ 'revenue': 373554033,
+ 'runtime': 81,
+ 'spoken_languages': [{'iso_639_1': 'en', 'name': 'English'}],
+ 'status': 'Released',
+ 'tagline': None,
+ 'title': 'Toy Story',
+ 'video': False,
+ 'vote_average': 7.7,
+ 'vote_count': 5415,
+ 'cast': [{'id': 31,
+           'name': 'Tom Hanks',
+           'gender': 2,
+           'order': 0,
+           'characters': ['Woody (voice)']},
+          {'id': 12898,
+           'name': 'Tim Allen',
+           'gender': 2,
+           'order': 1,
+           'characters': ['Buzz Lightyear (voice)']},
+          {'id': 7167,
+           'name': 'Don Rickles',
+           'gender': 2,
+           'order': 2,
+           'characters': ['Mr. Potato Head (voice)']}],
+ 'crew': [{'id': 7879,
+           'name': 'John Lasseter',
+           'job': 'Director',
+           'department': 'Directing'},
+          {'id': 12891,
+           'name': 'Joss Whedon',
+           'job': 'Screenplay',
+           'department': 'Writing'},
+          {'id': 7,
+           'name': 'Andrew Stanton',
+           'job': 'Screenplay',
+           'department': 'Writing'}],
+ 'keywords': [{'id': 931, 'name': 'jealousy'},
+              {'id': 4290, 'name': 'toy'},
+              {'id': 5202, 'name': 'boy'}]}
+Sample user (lowest _id; first 2 ratings)
+{'_id': 1,
+ 'ratings': [{'movie_id': 197,
+              'rating': 1.0,
+              'timestamp': datetime.datetime(2015, 3, 9, 22, 52, 9),
+              'genres': [{'id': 28, 'name': 'Action'},
+                         {'id': 18, 'name': 'Drama'},
+                         {'id': 36, 'name': 'History'},
+                         {'id': 10752, 'name': 'War'}]},
+             {'movie_id': 10474,
+              'rating': 4.5,
+              'timestamp': datetime.datetime(2015, 3, 9, 23, 7, 15),
+              'genres': [{'id': 18, 'name': 'Drama'},
+                         {'id': 80, 'name': 'Crime'}]}]}
+
+Verification: 14/14 checks passed
+
+-----------------------------------------------
+Connection to movie-db is closed
+(.venv) [sam@newHorizonsTrashEdition ASSIGMENT2]$ 
+
+
+========================================================================
+Q3: Top 10 actors (>= 10 movies) by genre breadth
+========================================================================
+  actors_with_all_genres
+------------------------
+                      22
+(2.4 s)
