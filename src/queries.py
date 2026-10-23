@@ -138,15 +138,9 @@ def q1(db: Database) -> list[Row]:
     Columns: director, movies, median_revenue, mean_vote_average.
     """
     return aggregate(db.movies, [
-        # Keep only movies with at least one director. On an array of
-        # subdocuments, "crew.job": "Director" means "ANY crew entry has job
-        # Director": whole movies are kept or dropped, the crew array itself is
-        # not filtered yet. (Optimisation only: skips movies without a director
-        # before the expensive $unwind.)
+        # Keep only movies with at least one director. 
         {"$match": {"crew.job": "Director"}},
-        # One document per crew member: Toy Story becomes ~100 documents that
-        # are identical except that "crew" is now ONE object instead of a list.
-        # Each copy keeps the movie's revenue and vote_average.
+        # One document per crew member.
         {"$unwind": "$crew"},
         # Same filter again, but now "crew" is a single person, so this keeps
         # exactly the director rows: one document per (movie, director) pair.
@@ -184,16 +178,11 @@ def q2(db: Database) -> list[Row]:
     it all, task2.py prints the first rows and the total.
     Columns: actor_1, actor_2, movies, avg_vote_average.
     """
-    # The cast trimmed to {id, name} per actor. $map works like a Python list
-    # comprehension: [{"id": c["id"], "name": c["name"]} for c in cast].
-    # "$$c" (two $) is the loop variable, "$cast" (one $) is a field.
-    # Built once in Python and used twice below: a stage cannot refer to a
-    # field that the same stage creates, so "b": "$a" would not work.
+
     cast_ids_names = {"$map": {"input": "$cast", "as": "c",
                                "in": {"id": "$$c.id", "name": "$$c.name"}}}
     return aggregate(db.movies, [
-        # Two copies of the (small) cast list. Keeping only id and name makes
-        # the tens of millions of pair documents below much smaller.
+        # Two copies of the (small) cast list.
         {"$project": {"vote_average": 1, "a": cast_ids_names, "b": cast_ids_names}},
         # Unwinding both copies gives every actor x actor combination inside a
         # movie: a cast of 3 gives 3 x 3 = 9 documents
@@ -201,9 +190,7 @@ def q2(db: Database) -> list[Row]:
         {"$unwind": "$b"},
         # Keep each pair once, with the smaller id first. This removes the
         # actor-with-themselves pairs (5, 5) and the mirrored duplicates
-        # ((9, 5) when (5, 9) is kept). Comparing ids, not cast positions,
-        # makes the same two people the same pair in every movie.
-        # $expr is needed to compare two fields of the same document.
+        # ((9, 5) when (5, 9) is kept)..
         {"$match": {"$expr": {"$lt": ["$a.id", "$b.id"]}}},
         # One document per pair: the compound _id groups on both ids at once
         {"$group": {
@@ -229,12 +216,8 @@ def q3(db: Database) -> list[Row]:
     Columns: actor, movies, distinct_genres, example_genres.
     """
     return aggregate(db.movies, [
-        # One document per (movie, actor). Genres are NOT unwound: a movie with
-        # 3 genres would then become 3 documents and be counted 3 times.
+        # One document per (movie, actor).
         {"$unwind": "$cast"},
-        # One document per actor: movie count + one genre-name list per movie.
-        # "$genres.name" is the array of names, e.g. ["Animation", "Comedy"],
-        # so $addToSet collects a list of LISTS (flattened below).
         {"$group": {
             "_id": "$cast.id",
             "actor": {"$first": "$cast.name"},
@@ -276,14 +259,9 @@ def q4(db: Database) -> list[Row]:
     Columns: collection, movies, total_revenue, median_vote_average, release_span.
     """
     return aggregate(db.movies, [
-        # Only movies in a collection. None is MongoDB's null ("null" in quotes
-        # would be the text "null"). $ne: None also drops documents where the
-        # field is missing: belongs_to_collection is null -> .name is missing.
+        # Only movies in a collection. 
         {"$match": {"belongs_to_collection.name": {"$ne": None}}},
         # One document per collection (grouped by collection id).
-        #   $sum of revenue: null counts as 0, so the total covers known revenues
-        #   $min / $max of release_date: real BSON dates compare by time, and
-        #   null (unknown date) is skipped
         {"$group": {
             "_id": "$belongs_to_collection.id",
             "collection": {"$first": "$belongs_to_collection.name"},
@@ -450,8 +428,7 @@ def q8(db: Database) -> list[Row]:
     cast_ids_names = {"$map": {"input": "$cast", "as": "c",
                                "in": {"id": "$$c.id", "name": "$$c.name"}}}
     return aggregate(db.movies, [
-        # Movies with >= 100 votes and at least one director (two conditions
-        # in one $match = AND)
+        # Movies with >= 100 votes and at least one director.
         {"$match": {"vote_count": {"$gte": 100}, "crew.job": "Director"}},
         # One document per (movie, director), the same three steps as Q1
         {"$unwind": "$crew"},
@@ -462,7 +439,6 @@ def q8(db: Database) -> list[Row]:
         # One document per (movie, director, actor)
         {"$unwind": "$actor"},
         # A director who also acts in the movie is not paired with themselves.
-        # $expr compares two fields of the same document.
         {"$match": {"$expr": {"$ne": ["$actor.id", "$crew.id"]}}},
         # One document per (director, actor) pair. The cast has one entry per
         # person per movie, so each film counts once per pair.
@@ -498,8 +474,6 @@ def q9(db: Database) -> list[Row]:
     Columns: original_language, movies, example_title.
     """
     return aggregate(db.movies, [
-        # Not English ($nin = "not in": also drops a null/missing language) and
-        # ANY production country is US (dot path into an array of subdocuments)
         {"$match": {"original_language": {"$nin": ["en", None]},
                     "production_countries.iso_3166_1": "US"}},
         # One document per language; $first picks the first matching movie as
