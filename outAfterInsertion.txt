@@ -131,13 +131,3 @@ Verification: 14/14 checks passed
 
 -----------------------------------------------
 Connection to movie-db is closed
-(.venv) [sam@newHorizonsTrashEdition ASSIGMENT2]$ 
-
-
-========================================================================
-Q3: Top 10 actors (>= 10 movies) by genre breadth
-========================================================================
-  actors_with_all_genres
-------------------------
-                      22
-(2.4 s)
